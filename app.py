@@ -39,23 +39,28 @@ app.config["SECRET_KEY"] = "in-memory-vault-secret-key"
 # Maximum size of one upload request.
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 
-# The browser uses a relative URL for uploads, but keep the API usable by
-# explicitly configured frontends as well. Do not reflect arbitrary origins.
-configured_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+# The API is public by default. Set CORS_ALLOWED_ORIGINS to a comma-separated
+# list of origins if the deployment should be restricted later.
+configured_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
 ALLOWED_ORIGINS = {
     origin.strip().rstrip("/")
     for origin in configured_origins.split(",")
     if origin.strip()
 }
+ALLOW_ALL_ORIGINS = "*" in ALLOWED_ORIGINS
 
 
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get("Origin", "").rstrip("/")
 
-    if origin and origin in ALLOWED_ORIGINS:
+    if ALLOW_ALL_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    elif origin and origin in ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
+
+    if ALLOW_ALL_ORIGINS or (origin and origin in ALLOWED_ORIGINS):
         response.headers["Access-Control-Allow-Methods"] = (
             "GET, POST, OPTIONS"
         )
