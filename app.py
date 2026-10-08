@@ -39,6 +39,32 @@ app.config["SECRET_KEY"] = "in-memory-vault-secret-key"
 # Maximum size of one upload request.
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
 
+# The browser uses a relative URL for uploads, but keep the API usable by
+# explicitly configured frontends as well. Do not reflect arbitrary origins.
+configured_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = {
+    origin.strip().rstrip("/")
+    for origin in configured_origins.split(",")
+    if origin.strip()
+}
+
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin", "").rstrip("/")
+
+    if origin and origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Methods"] = (
+            "GET, POST, OPTIONS"
+        )
+        response.headers["Access-Control-Allow-Headers"] = (
+            "Content-Type, X-Requested-With"
+        )
+
+    return response
+
 
 # All data is stored only in memory.
 # The data is lost when the application restarts.
@@ -931,6 +957,6 @@ def request_too_large(error):
 if __name__ == "__main__":
     app.run(
         host="0.0.0.0",
-        port=5000,
-        debug=True,
+        port=int(os.getenv("PORT", "5000")),
+        debug=os.getenv("FLASK_DEBUG", "").lower() == "true",
     )
