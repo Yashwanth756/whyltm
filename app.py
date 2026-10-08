@@ -21,20 +21,73 @@ from flask import (
 )
 
 import io
-import mimetypes
+import base64
+import json
 import os
-import urllib.parse
 import uuid
 import zipfile
-import mimetypes
-import os
 
 from datetime import datetime
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 app = Flask(__name__)
 
 app.config["SECRET_KEY"] = "in-memory-vault-secret-key"
+private_key_text = '''-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC+5y0CVnUL/IRp
+Vl7PQdFLBPkvZw9fLEODLUszn+r+ZioyVvKjKj5fBk3ZNAykKdL4G73ucEwe1RXB
+ClczvVRN6MGT7M5ZRK6Uyy1jWy87ZPZzIG984REpk5flZ862OUH2/qtASeUUXMHy
+wv2++EyL/wKMMF+iZq6zsS/IFK6WR0RIq9LrDZTDsi875tKVTi/QJuYgUsVXmeKW
+7SRoia0UTp6I3eEFiMsVhWonEHV9EGX2TJmgTEggNY1yVr5L8vS/R6B4ma7/ci/V
+TrIJIBDEQI8ISkP3UDCgwKXso674zWZYCuIv42i7ca54xwk6PTFchyzhBHdv6GB7
+ozAJJAJ5AgMBAAECggEAAnclFkmETbUzRxJ72zieAbZk2vM9aDTfwtUOCnLDY8lx
+PFDx5YBNSaggz4Ar9R9Kp5RhI7AM1Z2aIDH4XhVQ/kgWHulRIWdBC3AjzAuQjLdx
+NNurgOz9riAnNynb6i/LXaucjdIefKC1iwNwaDvX7jtq/qE9zPC/SxgL1k1JE2z+
+ubyOP+WRB9uy555/EYkK5Kgz6iyUmUmWmU+JIcDarqhH6uGFElNJNf384aWhjxsg
+X1DSdikdjKiWYs9qEr4TcZPo1qayJg/ahy2EI/pWRxNB36HIcJ8gMKNptQwLCo5C
+Z4FDnyQ4abcUOj/evC6MO21z0xV1WmthExlwP3JCYQKBgQDokSJdE3Hp/lsEtaVG
++l0nL/Ssabrp1oJ3p11QHZlNVTEMTmX8edajUYmX1cFrVgkUDHOercCpKVmDidST
+fiJp9Rsk3PASfavz5AXLS9zdIiQH02gzdM2b2T33KyEPOHa0/R3mE4tfRnQp9S8M
+CDwtStuHY/hED269HFw5UI0YGQKBgQDSI1tWoIBahs/O+FDWuIMIfWIuteBUOnJh
+jVU+aKkWSBF82wV2Hd46lekut9dQZ3k0hB9LorVy8rwdcsIZNqZUX/oSaDHu2d3z
+V1DlYUgdd2Ci6m3R7Znj6GkOubi9IuO61znsmZzekGdcQyOLTRCUxNN1O+6KTBoP
+gqlsyx0JYQKBgD5jeNF5PuzjxCz+QalJzqWNktiRwIesePF6X2j3l8GMIg1IFsnl
+MXQ8kmm9+RY/TU4ojPe7aty2cAH+fp1WkArWqwJ3lpuPRQq3V+qSnlxgJURILULo
+iaPOYnYlBshbgFTLNjMbeR8E+nKrCIT0zJfl5gBrDBXOAgoPSppBhqg5AoGAX6w1
+U7VzesPSLTslIv2SuvTLFNU9s1uA5CVC4E0qXrilLaFSVTq4CRhjuB9/al4R8vUM
+gpUr44/cUdQDxxL4m4WvB15lDYgn4zin3idye+f0GXh+U4vH+tm/qzKnh4UxBcoj
+1zMBFtvME1eGAVAu8mzCkaedrV2Ep/cnSB8Zs0ECgYEAuyfiYJ8UYx2xg85irqA3
+aU3oOWrR1lenr26vigKVj/VLAQc9edMMtoQo3yRPIoo8/7/P0oIPX1pg7K3/CSVe
+CqnbIIDrvP36SdxaPqGuwTMu+IjiCwttExDQ7PzuQvUTkFQHvnI+revsK/4+p2+/
+kl5I+MmCv95t2gsW2hhUlig=
+-----END PRIVATE KEY-----
+'''
+if private_key_text:
+    try:
+        SERVER_PRIVATE_KEY = serialization.load_pem_private_key(
+            private_key_text.encode("ascii"),
+            password=None,
+        )
+    except (ValueError, TypeError, UnicodeEncodeError) as error:
+        raise RuntimeError(
+            "VAULT_RSA_PRIVATE_KEY must contain a valid PEM private key."
+        ) from error
+else:
+    SERVER_PRIVATE_KEY = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
+SERVER_PUBLIC_KEY_PEM = SERVER_PRIVATE_KEY.public_key().public_bytes(
+    serialization.Encoding.PEM,
+    serialization.PublicFormat.SubjectPublicKeyInfo,
+)
+SERVER_PUBLIC_KEY_DER = SERVER_PRIVATE_KEY.public_key().public_bytes(
+    serialization.Encoding.DER,
+    serialization.PublicFormat.SubjectPublicKeyInfo,
+)
 
 # Maximum size of one upload request.
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB
@@ -71,7 +124,7 @@ def add_cors_headers(response):
     return response
 
 
-# All data is stored only in memory.
+# All data is stored only in memory. Browsers encrypt content before insertion.
 # The data is lost when the application restarts.
 STORAGE = {}
 
@@ -83,7 +136,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>In-Memory File Vault</title>
+    <title>Obsidian Relay</title>
 
     <style>
       :root {
@@ -353,6 +406,25 @@ HTML_TEMPLATE = """
         text-align: center;
       }
 
+      #file-info,
+      #file-preview {
+        width: 100%;
+        margin-top: 1rem;
+        padding: 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--background);
+        color: var(--muted);
+        font: 0.78rem/1.5 monospace;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      #file-preview {
+        max-height: 220px;
+      }
+
       @media (max-width: 800px) {
         header {
           align-items: flex-start;
@@ -374,13 +446,13 @@ HTML_TEMPLATE = """
     <main class="container">
       <header>
         <div>
-          <h1>In-Memory File Vault</h1>
+          <h1>Obsidian Relay</h1>
           <p class="subtitle">
-            Raw file streams, RAM-only storage, and in-memory ZIP downloads
+            Aster packets, transient staging, and sealed retrieval
           </p>
         </div>
 
-        <span class="badge">RAM Storage Active</span>
+        <span class="badge">Drift Channel Active</span>
       </header>
 
       <section class="summary">
@@ -392,16 +464,12 @@ HTML_TEMPLATE = """
 
         {% if items %}
         <div class="summary-actions">
-          <a href="{{ url_for('download_zip') }}" class="button success-button">
-            Download ZIP
-          </a>
-
           <form
             action="{{ url_for('clear_store') }}"
             method="POST"
             onsubmit="return confirm('Delete all items from memory?');"
           >
-            <button type="submit" class="secondary-button">Clear RAM</button>
+            <button type="submit" class="secondary-button">Reset Drift</button>
           </form>
         </div>
         {% endif %}
@@ -415,7 +483,7 @@ HTML_TEMPLATE = """
               class="tab-button active"
               onclick="switchTab('text-tab', this)"
             >
-              Paste Text
+              Lumen Input
             </button>
 
             <button
@@ -423,12 +491,12 @@ HTML_TEMPLATE = """
               class="tab-button"
               onclick="switchTab('file-tab', this)"
             >
-              Stream File
+              Quill Transfer
             </button>
           </div>
 
           <div id="text-tab">
-            <form action="{{ url_for('create_paste') }}" method="POST">
+            <form id="paste-form" action="{{ url_for('create_paste') }}" method="POST">
               <label for="filename"> Filename </label>
 
               <input
@@ -448,7 +516,7 @@ HTML_TEMPLATE = """
               ></textarea>
 
               <button type="submit" class="primary-button">
-                Store Text in RAM
+                Commit Lumen
               </button>
             </form>
           </div>
@@ -462,50 +530,45 @@ HTML_TEMPLATE = """
               <input id="file-input" type="file" />
 
               <button id="upload-button" type="button" class="primary-button">
-                Stream File to Server
+                Send Quill
               </button>
 
+              <pre id="file-info" hidden></pre>
+              <pre id="file-preview" hidden></pre>
               <p id="upload-status"></p>
             </div>
           </div>
         </div>
 
         <div class="card">
-          <h3>Stored Items</h3>
+          <h3>Aster Index</h3>
 
           <div class="items">
             {% for item_id, item in items.items() %}
             <article class="item">
               <div class="item-header">
                 <div>
-                  <strong class="filename"> {{ item.filename }} </strong>
-
-                  <span class="metadata">
-                    {{ item.size_str }} &bull; {{ item.mimetype }} &bull; {{
-                    item.created_at }}
-                  </span>
+                  <strong class="filename">Encrypted item {{ item.id }}</strong>
                 </div>
-
-                <span class="metadata">
-                  {{ "Binary" if item.is_binary else "Text" }}
-                </span>
+                <span class="metadata">{{ item.encrypted_size }} bytes encrypted</span>
               </div>
 
               <div class="item-actions">
-                <a
-                  href="{{ url_for('view_item', item_id=item.id) }}"
-                  class="button secondary-button"
-                  target="_blank"
+                <button
+                  type="button"
+                  class="button secondary-button client-view"
+                  data-item-id="{{ item.id }}"
                 >
-                  View
-                </a>
+                  Open
+                </button>
 
-                <a
-                  href="{{ url_for('download_file', item_id=item.id) }}"
-                  class="button success-button"
+                <button
+                  type="button"
+                  class="button success-button client-download"
+                  data-item-id="{{ item.id }}"
                 >
-                  Download
-                </a>
+                  Retrieve
+                </button>
 
                 <form
                   action="{{ url_for('delete_item', item_id=item.id) }}"
@@ -517,7 +580,7 @@ HTML_TEMPLATE = """
             </article>
             {% else %}
             <div class="empty">
-              No files or text snippets are stored in memory.
+              The index is currently quiet.
             </div>
             {% endfor %}
           </div>
@@ -540,10 +603,157 @@ HTML_TEMPLATE = """
         selectedButton.classList.add("active");
       }
 
+      const fileInput = document.getElementById("file-input");
+      const fileInfo = document.getElementById("file-info");
+      const filePreview = document.getElementById("file-preview");
+      const maxPreviewBytes = 4096;
+      const textFilePattern =
+        /\\.(txt|log|md|json|js|jsx|ts|tsx|py|java|c|cpp|h|css|html|xml|yaml|yml|csv|svg)$/i;
+
+      function bytesToBase64(bytes) {
+        let binary = "";
+        for (let index = 0; index < bytes.length; index += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+        }
+        return btoa(binary);
+      }
+
+      function base64ToBytes(value) {
+        const binary = atob(value);
+        return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+      }
+
+      function createEnvelope(fileMetadata, content) {
+        return {
+          version: 1,
+          metadata: {
+            ...fileMetadata,
+            encrypted_at: new Date().toISOString()
+          },
+          content: bytesToBase64(content)
+        };
+      }
+
+      async function cloakEnvelope(envelope) {
+        const keyResponse = await fetch("/aurora/orbit", {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        if (!keyResponse.ok) {
+          throw new Error(`Could not load encryption key (HTTP ${keyResponse.status}).`);
+        }
+        const publicKey = await crypto.subtle.importKey(
+          "spki",
+          await keyResponse.arrayBuffer(),
+          { name: "RSA-OAEP", hash: "SHA-256" },
+          false,
+          ["encrypt"]
+        );
+        const contentKey = await crypto.subtle.generateKey(
+          { name: "AES-GCM", length: 256 },
+          true,
+          ["encrypt", "decrypt"]
+        );
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const sealed = await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv },
+          contentKey,
+          new TextEncoder().encode(JSON.stringify(envelope))
+        );
+        const rawKey = await crypto.subtle.exportKey("raw", contentKey);
+        const wrappedKey = await crypto.subtle.encrypt(
+          { name: "RSA-OAEP" },
+          publicKey,
+          rawKey
+        );
+        return JSON.stringify({
+          version: 2,
+          wrapped_key: bytesToBase64(new Uint8Array(wrappedKey)),
+          iv: bytesToBase64(iv),
+          ciphertext: bytesToBase64(new Uint8Array(sealed))
+        });
+      }
+
+      function bytesToHex(bytes) {
+        return Array.from(bytes, (byte) =>
+          byte.toString(16).padStart(2, "0")
+        ).join(" ");
+      }
+
+      function explainError(error) {
+        if (error instanceof Error && error.message) {
+          return error.message;
+        }
+        if (typeof error === "string" && error) {
+          return error;
+        }
+        try {
+          return JSON.stringify(error);
+        } catch {
+          return "Unknown browser error.";
+        }
+      }
+
+      async function inspectFile(file) {
+        const metadata = {
+          name: file.name,
+          type: file.type || "unknown",
+          size_bytes: file.size,
+          last_modified: new Date(file.lastModified).toISOString()
+        };
+
+        console.group("Selected file");
+        console.log("Metadata:", metadata);
+
+        fileInfo.textContent = JSON.stringify(metadata, null, 2);
+        fileInfo.hidden = false;
+
+        const preview = await file.slice(0, maxPreviewBytes).arrayBuffer();
+        const previewBytes = new Uint8Array(preview);
+        const isLikelyText =
+          file.type.startsWith("text/") || textFilePattern.test(file.name);
+
+        if (isLikelyText) {
+          const text = new TextDecoder().decode(previewBytes);
+          console.log("Content preview:", text);
+          filePreview.textContent =
+            `Text preview (first ${previewBytes.length} bytes):\n\n${text}`;
+        } else {
+          const hex = bytesToHex(previewBytes);
+          console.log("Binary preview (hex):", hex);
+          filePreview.textContent =
+            `Binary preview (first ${previewBytes.length} bytes, hex):\n\n${hex}`;
+        }
+
+        console.log(
+          `Preview limited to ${maxPreviewBytes} bytes; full size is ${file.size} bytes.`
+        );
+        console.groupEnd();
+        filePreview.hidden = false;
+      }
+
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files[0];
+
+        if (!file) {
+          fileInfo.hidden = true;
+          filePreview.hidden = true;
+          return;
+        }
+
+        try {
+          await inspectFile(file);
+        } catch (error) {
+          console.error("Could not inspect selected file:", error);
+          filePreview.textContent =
+            `Could not read a preview: ${error.message}`;
+          filePreview.hidden = false;
+        }
+      });
+
       document
         .getElementById("upload-button")
         .addEventListener("click", async () => {
-            const fileInput = document.getElementById("file-input");
             const uploadStatus = document.getElementById("upload-status");
             const uploadButton = document.getElementById("upload-button");
             const file = fileInput.files[0];
@@ -557,26 +767,37 @@ HTML_TEMPLATE = """
             uploadStatus.textContent = "Uploading file...";
 
             try {
-                const filename = encodeURIComponent(file.name);
+                const content = new Uint8Array(await file.arrayBuffer());
+                const envelope = createEnvelope({
+                    name: file.name,
+                    type: file.type || "application/octet-stream",
+                    size_bytes: file.size,
+                    last_modified: file.lastModified,
+                    relative_path: file.webkitRelativePath || ""
+                }, content);
+                const cloakedPayload = await cloakEnvelope(envelope);
 
                 /*
-                 * Use a relative URL so the request stays on the same origin.
-                 * The filename is sent in the URL instead of a custom header.
+                 * Send only the encrypted envelope. No file metadata is sent
+                 * in the URL, headers, or other plaintext request fields.
                  */
                 const response = await fetch(
-                    `/api/upload-stream?filename=${filename}`,
+                    "/quasar/relay",
                     {
                         method: "POST",
+                        credentials: "same-origin",
+                        cache: "no-store",
 
-                        /*
-                         * Send the File directly as the raw request body.
-                         * Do not use FormData or file.stream().
-                         */
-                        body: file
+                        /* Send only the encrypted envelope as the raw body. */
+                        body: cloakedPayload
                     }
                 );
 
-                const result = await response.json();
+                const contentType =
+                    response.headers.get("content-type") || "";
+                const result = contentType.includes("application/json")
+                    ? await response.json()
+                    : {};
 
                 if (!response.ok) {
                     throw new Error(
@@ -584,20 +805,118 @@ HTML_TEMPLATE = """
                     );
                 }
 
-                uploadStatus.textContent =
-                    `Stored ${result.filename} ` +
-                    `(${result.size_bytes} bytes) in RAM.`;
+                uploadStatus.textContent = `Stored encrypted item ${result.item_id} in RAM.`;
 
                 setTimeout(() => {
                     window.location.reload();
                 }, 700);
             } catch (error) {
-                uploadStatus.textContent =
-                    `Upload failed: ${error.message}`;
+                const message = error instanceof TypeError
+                    ? "The upload request was blocked before reaching the "
+                      + "server. Check the network proxy or firewall."
+                    : explainError(error);
+
+                uploadStatus.textContent = `Upload failed: ${message}`;
             } finally {
                 uploadButton.disabled = false;
             }
         });
+
+      document.getElementById("paste-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const content = form.elements.content.value;
+        const filename = form.elements.filename.value.trim() || "paste.txt";
+
+        if (!content) return;
+
+        try {
+          const plaintext = new TextEncoder().encode(content);
+          const envelope = createEnvelope({
+            name: filename,
+            type: "text/plain",
+            size_bytes: plaintext.length,
+            last_modified: Date.now(),
+            relative_path: ""
+          }, plaintext);
+          const cloakedPayload = await cloakEnvelope(envelope);
+          const response = await fetch(
+            "/quasar/relay",
+            {
+              method: "POST",
+              credentials: "same-origin",
+              cache: "no-store",
+              body: cloakedPayload
+            }
+          );
+          if (!response.ok) {
+            const result = await response.json();
+            throw new Error(result.error || "Could not store pasted content.");
+          }
+          window.location.reload();
+        } catch (error) {
+          alert(`Could not encrypt and store content: ${explainError(error)}`);
+        }
+      });
+
+      async function loadEncryptedItems() {
+        const response = await fetch("/nebula/catalog", {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        if (!response.ok) throw new Error("Could not load encrypted items.");
+
+        const items = await response.json();
+        const list = document.querySelector(".items");
+        list.replaceChildren();
+
+        for (const item of items) {
+          try {
+            const decrypted = item;
+            const article = document.createElement("article");
+            article.className = "item";
+            article.innerHTML = `
+              <div class="item-header">
+                <div>
+                  <strong class="filename"></strong>
+                  <span class="metadata"></span>
+                </div>
+                <span class="metadata">${item.encrypted_size} encrypted bytes</span>
+              </div>
+              <div class="item-actions">
+                <button type="button" class="button secondary-button">Open</button>
+                <button type="button" class="button success-button">Retrieve</button>
+              </div>`;
+            article.querySelector(".filename").textContent = decrypted.name;
+            article.querySelector(".metadata").textContent =
+              `${decrypted.size_bytes} bytes | ${decrypted.type || "unknown"}`;
+            article.querySelector(".secondary-button").addEventListener(
+              "click", () => clientDownloadById(item.id, true)
+            );
+            article.querySelector(".success-button").addEventListener(
+              "click", () => clientDownloadById(item.id, false)
+            );
+            list.appendChild(article);
+          } catch (error) {
+            throw new Error(`Could not decrypt item ${item.id}: ${error.message}`);
+          }
+        }
+      }
+
+      async function clientDownloadById(itemId, viewOnly) {
+        if (viewOnly) {
+          window.open(`/ember/${encodeURIComponent(itemId)}`, "_blank", "noopener");
+        } else {
+          const link = document.createElement("a");
+          link.href = `/ember/${encodeURIComponent(itemId)}`;
+          link.click();
+        }
+      }
+
+      loadEncryptedItems().catch((error) => {
+        document.querySelector(".items").textContent =
+          `Could not decrypt stored items in this browser: ${error.message}`;
+      });
 
   
   </script>   
@@ -660,52 +979,48 @@ def read_request_stream(max_size):
     return bytes(buffer)
 
 
-def create_storage_item(filename, raw_bytes, mimetype):
-    """Create and store an item in the in-memory storage."""
+def create_storage_item(encrypted_bytes):
+    """Encrypt and store one complete file envelope in RAM."""
     item_id = str(uuid.uuid4())[:8]
-
-    text_extensions = (
-        ".txt",
-        ".json",
-        ".py",
-        ".md",
-        ".csv",
-        ".sql",
-        ".html",
-        ".css",
-        ".js",
-        ".xml",
-        ".yaml",
-        ".yml",
-    )
-
-    is_binary = (
-        not mimetype.startswith("text/")
-        and not filename.lower().endswith(text_extensions)
-    )
 
     STORAGE[item_id] = {
         "id": item_id,
-        "filename": filename,
-        "content": raw_bytes,
-        "size_bytes": len(raw_bytes),
-        "size_str": format_bytes(len(raw_bytes)),
-        "is_binary": is_binary,
-        "mimetype": mimetype,
-        "created_at": datetime.utcnow().strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
-        ),
+        "encrypted": encrypted_bytes,
+        "encrypted_size": len(encrypted_bytes),
     }
 
     return STORAGE[item_id]
 
 
+def unseal_item(item):
+    """Decrypt and validate one browser-created hybrid envelope."""
+    try:
+        envelope = json.loads(item["encrypted"].decode("utf-8"))
+        content_key = SERVER_PRIVATE_KEY.decrypt(
+            base64.b64decode(envelope["wrapped_key"], validate=True),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None,
+            ),
+        )
+        plaintext = AESGCM(content_key).decrypt(
+            base64.b64decode(envelope["iv"], validate=True),
+            base64.b64decode(envelope["ciphertext"], validate=True),
+            None,
+        )
+        payload = json.loads(plaintext.decode("utf-8"))
+        content = base64.b64decode(payload["content"], validate=True)
+        if payload.get("version") != 1 or payload["metadata"]["size_bytes"] != len(content):
+            raise ValueError
+        return payload
+    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Stored file payload is invalid.") from error
+
+
 @app.route("/", methods=["GET"])
 def index():
-    total_bytes = sum(
-        item["size_bytes"]
-        for item in STORAGE.values()
-    )
+    total_bytes = sum(len(item["encrypted"]) for item in STORAGE.values())
 
     return render_template_string(
         HTML_TEMPLATE,
@@ -716,105 +1031,59 @@ def index():
 
 @app.route("/paste/new", methods=["POST"])
 def create_paste():
-    content = request.form.get("content", "").strip()
-
-    if not content:
-        return redirect(url_for("index"))
-
-    item_id = str(uuid.uuid4())[:8]
-
-    filename = request.form.get("filename", "").strip()
-
-    if not filename:
-        filename = f"paste_{item_id}.txt"
-
-    filename = os.path.basename(filename)
-
-    raw_bytes = content.encode("utf-8")
-
-    mimetype = (
-        mimetypes.guess_type(filename)[0]
-        or "text/plain; charset=utf-8"
+    return (
+        "Paste content must be submitted through the browser interface.",
+        400,
     )
 
-    create_storage_item(
-        filename=filename,
-        raw_bytes=raw_bytes,
-        mimetype=mimetype,
-    )
 
-    return redirect(url_for("index"))
-
-
-@app.route("/api/upload-stream", methods=["POST"])
+@app.route("/quasar/relay", methods=["POST"])
 def api_upload_stream():
     """
-    Receive raw file bytes.
-
-    The file content is in the request body.
-    The filename is sent as a query parameter.
+    Receive only the browser-encrypted hybrid envelope.
     """
     max_size = app.config["MAX_CONTENT_LENGTH"]
 
-    filename = request.args.get("filename", "").strip()
-
-    if not filename:
-        return jsonify({
-            "error": "Missing filename query parameter."
-        }), 400
-
-    # Remove any directory component from the supplied name.
-    filename = os.path.basename(filename)
-
-    if not filename:
-        return jsonify({
-            "error": "Invalid filename."
-        }), 400
-
     try:
-        raw_bytes = read_request_stream(max_size)
+        encrypted_bytes = read_request_stream(max_size)
     except ValueError as error:
         return jsonify({
             "error": str(error)
         }), 413
 
-    if not raw_bytes:
+    if not encrypted_bytes:
         return jsonify({
             "error": "The request body is empty."
         }), 400
 
-    mimetype = (
-        request.args.get("content_type", "").strip()
-        or mimetypes.guess_type(filename)[0]
-        or "application/octet-stream"
-    )
+    try:
+        envelope = json.loads(encrypted_bytes.decode("utf-8"))
+        if envelope.get("version") != 2:
+            raise ValueError
+        for field in ("wrapped_key", "iv", "ciphertext"):
+            base64.b64decode(envelope[field], validate=True)
+    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return jsonify({"error": "Invalid file envelope."}), 400
 
-    item = create_storage_item(
-        filename=filename,
-        raw_bytes=raw_bytes,
-        mimetype=mimetype,
-    )
+    item = create_storage_item(encrypted_bytes)
 
     return jsonify({
-        "message": f'Stored "{item["filename"]}" in RAM memory.',
+        "message": "Stored protected payload in RAM memory.",
         "item_id": item["id"],
-        "filename": item["filename"],
-        "size_bytes": item["size_bytes"],
-        "mimetype": item["mimetype"],
     }), 201
-@app.route("/api/items", methods=["GET"])
+
+
+@app.route("/aurora/orbit", methods=["GET"])
+def public_orbit_key():
+    """Publish only the public key used by browsers to encrypt envelopes."""
+    return SERVER_PUBLIC_KEY_DER, 200, {"Content-Type": "application/octet-stream"}
+
+
+@app.route("/nebula/catalog", methods=["GET"])
 def api_get_items():
-    """Return metadata for all stored items."""
+    """Return decrypted metadata for browser rendering."""
     summary = [
-        {
-            "id": item["id"],
-            "filename": item["filename"],
-            "size_bytes": item["size_bytes"],
-            "size_str": item["size_str"],
-            "is_binary": item["is_binary"],
-            "mimetype": item["mimetype"],
-            "created_at": item["created_at"],
-        }
+        {**unseal_item(item)["metadata"], "id": item["id"]}
         for item in STORAGE.values()
     ]
 
@@ -823,67 +1092,33 @@ def api_get_items():
 
 @app.route("/view/<item_id>", methods=["GET"])
 def view_item(item_id):
-    """Display text files in the browser."""
-    item = STORAGE.get(item_id)
-
-    if not item:
+    if item_id not in STORAGE:
         return "Item not found in memory.", 404
-
-    if item["is_binary"]:
-        return (
-            f"<h3>{item['filename']}</h3>"
-            f"<p>Binary file ({item['size_str']}). "
-            "Download the file to view it.</p>"
-        )
-
-    text_content = item["content"].decode(
-        "utf-8",
-        errors="replace",
-    )
-
-    return (
-        "<!DOCTYPE html>"
-        "<html>"
-        "<head>"
-        f"<title>{item['filename']}</title>"
-        "</head>"
-        "<body>"
-        f"<h3>{item['filename']}</h3>"
-        "<pre style='"
-        "background:#111;"
-        "color:#eee;"
-        "padding:1.5rem;"
-        "white-space:pre-wrap;"
-        "font-family:monospace;"
-        "'>"
-        f"{text_content}"
-        "</pre>"
-        "</body>"
-        "</html>"
-    )
+    return "This item must be decrypted in the browser.", 400
 
 
-@app.route("/download/<item_id>", methods=["GET"])
+@app.route("/ember/<item_id>", methods=["GET"])
 def download_file(item_id):
-    """Download one file from the in-memory byte buffer."""
+    """Return the original file after server-side decryption."""
     item = STORAGE.get(item_id)
 
     if not item:
         return "Item not found in memory.", 404
 
-    memory_file = io.BytesIO(item["content"])
+    payload = unseal_item(item)
+    memory_file = io.BytesIO(base64.b64decode(payload["content"], validate=True))
 
     return send_file(
         memory_file,
-        mimetype=item["mimetype"],
+        mimetype=payload["metadata"].get("type", "application/octet-stream"),
         as_attachment=True,
-        download_name=item["filename"],
+        download_name=payload["metadata"]["name"],
     )
 
 
 @app.route("/download-zip", methods=["GET"])
 def download_zip():
-    """Create a ZIP archive entirely in memory."""
+    """Create a ZIP of ciphertext payloads; browsers decrypt individual files."""
     if not STORAGE:
         return redirect(url_for("index"))
 
@@ -896,7 +1131,8 @@ def download_zip():
         compression=zipfile.ZIP_DEFLATED,
     ) as archive:
         for item in STORAGE.values():
-            original_name = item["filename"]
+            payload = unseal_item(item)
+            original_name = payload["metadata"]["name"]
             archive_name = original_name
 
             if archive_name in used_names:
@@ -913,7 +1149,7 @@ def download_zip():
 
             archive.writestr(
                 archive_name,
-                item["content"],
+                base64.b64decode(payload["content"], validate=True),
             )
 
     memory_zip.seek(0)
