@@ -32,11 +32,10 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-
 app = Flask(__name__)
 
 app.config["SECRET_KEY"] = "in-memory-vault-secret-key"
-private_key_text = '''-----BEGIN PRIVATE KEY-----
+private_key_text = """-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC+5y0CVnUL/IRp
 Vl7PQdFLBPkvZw9fLEODLUszn+r+ZioyVvKjKj5fBk3ZNAykKdL4G73ucEwe1RXB
 ClczvVRN6MGT7M5ZRK6Uyy1jWy87ZPZzIG984REpk5flZ862OUH2/qtASeUUXMHy
@@ -64,7 +63,7 @@ aU3oOWrR1lenr26vigKVj/VLAQc9edMMtoQo3yRPIoo8/7/P0oIPX1pg7K3/CSVe
 CqnbIIDrvP36SdxaPqGuwTMu+IjiCwttExDQ7PzuQvUTkFQHvnI+revsK/4+p2+/
 kl5I+MmCv95t2gsW2hhUlig=
 -----END PRIVATE KEY-----
-'''
+"""
 if private_key_text:
     try:
         SERVER_PRIVATE_KEY = serialization.load_pem_private_key(
@@ -114,9 +113,7 @@ def add_cors_headers(response):
         response.headers["Vary"] = "Origin"
 
     if ALLOW_ALL_ORIGINS or (origin and origin in ALLOWED_ORIGINS):
-        response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, OPTIONS"
-        )
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = (
             "Content-Type, X-Requested-With"
         )
@@ -129,800 +126,943 @@ def add_cors_headers(response):
 STORAGE = {}
 
 
-HTML_TEMPLATE = """
+HTML_TEMPLATE = r"""
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Obsidian Relay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<script>
+try {
+  const saved = localStorage.getItem("relay-theme");
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.dataset.theme = saved || (dark ? "dark" : "light");
+} catch (e) {}
+</script>
+<style>
+:root[data-theme="dark"]{
+  --bg:#0e1013;--panel:#14171b;--sunk:#0b0d0f;--hover:#1a1e23;--line:#242930;--line-strong:#3a414b;
+  --text:#eceef2;--muted:#98a0ac;--faint:#5d6672;--accent:#8aa4ff;--accent-strong:#a5b9ff;--accent-ink:#0b1124;
+  --accent-soft:rgba(138,164,255,.13);--ok:#6cc59b;--bad:#f2837b;--shadow:0 24px 60px rgba(0,0,0,.55);color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#eceef1;--panel:#f9fafb;--sunk:#e4e7eb;--hover:#f0f2f5;--line:#d9dde3;--line-strong:#b8bec8;
+  --text:#15171c;--muted:#5a606b;--faint:#8b919c;--accent:#3249d8;--accent-strong:#2336b8;--accent-ink:#fff;
+  --accent-soft:rgba(50,73,216,.09);--ok:#12805a;--bad:#c2392f;--shadow:0 24px 60px rgba(20,24,33,.16);color-scheme:light;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+body{min-height:100vh;background:var(--bg);color:var(--text);
+  font:15px/1.5 "Bricolage Grotesque",ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;font-optical-sizing:auto;transition:background .2s,color .2s}
+::selection{background:var(--accent-soft)}
+button,input,select,textarea{font:inherit;color:inherit}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[hidden]{display:none!important}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
 
-    <title>Obsidian Relay</title>
+.shell{width:100%;max-width:1240px;margin:0 auto;padding:calc(32px + env(safe-area-inset-top,0px)) 28px calc(64px + env(safe-area-inset-bottom,0px))}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1.5rem;margin-bottom:2.25rem}
+h1{font-size:clamp(2rem,4.6vw,3.4rem);font-weight:700;letter-spacing:-.045em;line-height:1.02}
+.subtitle{margin-top:.7rem;max-width:46ch;color:var(--muted);font-size:1.02rem}
+.top-side{display:flex;align-items:center;gap:.6rem}
+.badge{display:inline-flex;align-items:center;gap:.55rem;height:36px;padding:0 .9rem;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.8rem;font-weight:500;white-space:nowrap}
+.badge::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 24%,transparent);animation:beat 2.8s ease-in-out infinite}
+@keyframes beat{50%{box-shadow:0 0 0 6px transparent}}
 
-    <style>
-      :root {
-        --background: #0b0f19;
-        --card: #151d30;
-        --border: #233152;
-        --text: #f8fafc;
-        --muted: #94a3b8;
-        --primary: #4f46e5;
-        --primary-hover: #4338ca;
-        --success: #059669;
-        --danger: #ef4444;
-      }
+.layout{display:grid;grid-template-columns:minmax(0,540px) minmax(0,1fr);gap:1.5rem;align-items:start}
+.panel{border:1px solid var(--line);border-radius:18px;background:var(--panel)}
+.compose{position:sticky;top:24px;padding:.5rem 1.5rem 1.5rem}
+.index{padding:1.5rem 0 .5rem;min-height:520px}
 
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-        font-family:
-          system-ui,
-          -apple-system,
-          BlinkMacSystemFont,
-          sans-serif;
-      }
+.tabs{display:flex;gap:1.5rem;margin:0 0 1.4rem;border-bottom:1px solid var(--line)}
+.tab-button{position:relative;padding:1rem 0 .95rem;border:0;background:none;cursor:pointer;color:var(--muted);font-size:.95rem;font-weight:500;transition:color .15s}
+.tab-button:hover,.tab-button.active{color:var(--text)}
+.tab-button.active::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
 
-      body {
-        min-height: 100vh;
-        padding: 2rem 1rem;
-        background: var(--background);
-        color: var(--text);
-      }
+label{display:block;margin-bottom:.4rem;color:var(--muted);font-size:.82rem;font-weight:500}
+input[type=text],input[type=search],select,textarea{width:100%;padding:.7rem .85rem;border:1px solid var(--line);border-radius:10px;outline:none;background:var(--sunk);font-size:.95rem;transition:border-color .15s,box-shadow .15s}
+input[type=text]{margin-bottom:1.1rem}
+::placeholder{color:var(--faint)}
+input:hover,textarea:hover,select:hover{border-color:var(--line-strong)}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 
-      .container {
-        width: 100%;
-        max-width: 1100px;
-        margin: 0 auto;
-      }
+/* custom select */
+.select{position:relative;display:inline-block}
+.select select{appearance:none;-webkit-appearance:none;width:auto;min-width:132px;height:40px;padding:0 2.2rem 0 .9rem;cursor:pointer;font-size:.88rem;font-weight:500;background:var(--sunk)}
+.select::after{content:"";position:absolute;right:.95rem;top:50%;width:7px;height:7px;margin-top:-6px;border:solid var(--muted);border-width:0 1.6px 1.6px 0;transform:rotate(45deg);pointer-events:none;transition:border-color .15s}
+.select:hover::after,.select:focus-within::after{border-color:var(--accent)}
+.select option{background:var(--panel);color:var(--text);padding:.5rem}
 
-      header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 1rem;
-        margin-bottom: 2rem;
-      }
+/* editor */
+.editor{margin-bottom:.9rem;border:1px solid var(--line);border-radius:12px;background:var(--sunk);overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.editor:hover{border-color:var(--line-strong)}
+.editor:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.editor-bar{display:flex;justify-content:space-between;align-items:center;padding:.4rem .5rem .4rem .85rem;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--panel) 70%,var(--sunk));color:var(--muted);font-size:.8rem;font-weight:500}
+.editor-tools{display:flex;gap:.25rem}
+.editor textarea{display:block;width:100%;min-height:360px;max-height:600px;padding:1.1rem 1.2rem;border:0;border-radius:0;background:transparent;box-shadow:none;resize:none;tab-size:2;
+  font:500 .85rem/1.7 "JetBrains Mono",ui-monospace,Menlo,Consolas,monospace}
+.editor-foot{display:flex;justify-content:space-between;gap:1rem;padding:.45rem .85rem;border-top:1px solid var(--line);color:var(--faint);font-size:.74rem}
+.editor-foot span{white-space:nowrap}
+kbd{padding:.05rem .4rem;border:1px solid var(--line-strong);border-radius:5px;background:var(--sunk);font:500 .7rem "JetBrains Mono",ui-monospace,monospace;color:var(--muted)}
 
-      h1 {
-        font-size: 1.8rem;
-      }
+.btn{display:inline-flex;justify-content:center;align-items:center;gap:.4rem;min-height:40px;padding:0 1rem;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--text);font-size:.88rem;font-weight:500;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s,color .15s,transform .06s}
+.btn:hover{border-color:var(--line-strong);background:var(--hover)}
+.btn:active{transform:scale(.98)}
+.btn:focus-visible,.tab-button:focus-visible,.dropzone:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-primary{width:100%;min-height:46px;border-color:transparent;background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:.95rem}
+.btn-primary:hover:not(:disabled){background:var(--accent-strong);border-color:transparent}
+.btn-quiet{border-color:transparent;color:var(--muted)}
+.btn-quiet:hover{color:var(--text)}
+.btn-danger{border-color:transparent;color:var(--muted)}
+.btn-danger:hover{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad);border-color:transparent}
+.btn-sm{min-height:32px;padding:0 .75rem;border-radius:8px;font-size:.8rem}
+.btn-icon{min-height:36px;padding:0 .85rem;border-radius:999px;font-size:.8rem;color:var(--muted)}
 
-      h2,
-      h3 {
-        margin-bottom: 1rem;
-      }
+/* dropzone */
+.dropzone{display:grid;justify-items:center;gap:.35rem;padding:2rem 1.25rem 1.5rem;border:1.5px dashed var(--line-strong);border-radius:14px;background:var(--sunk);text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.dropzone:hover{border-color:var(--accent)}
+.dropzone.dragging{border-color:var(--accent);background:var(--accent-soft)}
+.dz-icon{display:grid;place-items:center;width:52px;height:52px;margin-bottom:.5rem;border:1px solid var(--line-strong);border-radius:14px;background:var(--panel);color:var(--accent)}
+.dz-icon svg{width:24px;height:24px}
+.dropzone p{font-weight:600;font-size:1rem;line-height:1.35}
+.dropzone .help-text{color:var(--muted);font-size:.82rem;font-weight:400}
+.pickers{display:flex;justify-content:center;gap:.5rem;margin:1rem 0 0;flex-wrap:wrap}
 
-      .subtitle {
-        color: var(--muted);
-        margin-top: 0.4rem;
-      }
+.queue-wrap{margin-top:1rem}
+.queue-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:.4rem;color:var(--muted);font-size:.82rem}
+.queue-head strong{color:var(--text);font-weight:600}
+.queue{list-style:none;max-height:240px;overflow-y:auto;border-top:1px solid var(--line);scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.queue li{display:flex;align-items:center;gap:.75rem;padding:.55rem 0;border-bottom:1px solid var(--line)}
+.queue .ext{width:34px;height:38px;font-size:.56rem}
+.queue .q-body{flex:1;min-width:0}
+.q-name,.q-meta{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-name{font-size:.88rem;font-weight:500}
+.q-meta{color:var(--faint);font-size:.74rem}
+.q-state{font-size:.72rem;color:var(--muted)}
+.q-state.ok{color:var(--ok)}
+.send-row{margin-top:1rem}
+.progress{height:4px;margin-top:1rem;border-radius:4px;background:var(--line);overflow:hidden}
+.progress div{width:0;height:100%;background:var(--accent);transition:width .15s}
+#upload-status{margin-top:.8rem;color:var(--muted);font-size:.84rem;text-align:center;overflow-wrap:anywhere}
+#upload-status:empty{display:none}
+#file-info,#file-preview{width:100%;margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--line);border-radius:10px;background:var(--sunk);color:var(--muted);overflow:auto;font:500 .72rem/1.6 "JetBrains Mono",ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+#file-preview{max-height:160px}
 
-      .badge {
-        padding: 0.4rem 0.8rem;
-        border-radius: 999px;
-        background: #064e3b;
-        color: #6ee7b7;
-        font-size: 0.8rem;
-        font-weight: 700;
-        white-space: nowrap;
-      }
+/* index */
+.index-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:0 1.5rem}
+h3{font-size:1.35rem;font-weight:600;letter-spacing:-.02em}
+.summary{margin:.25rem 0 0;padding:0 1.5rem;color:var(--muted);font-size:.88rem}
+.summary strong{color:var(--text);font-weight:600}
+.summary-actions{display:flex;gap:.5rem;align-items:center}
+.summary-actions form{display:contents}
+.toolbar{display:flex;gap:.5rem;margin:1.25rem 0 .5rem;padding:0 1.5rem}
+.toolbar input{flex:1;min-width:0;height:40px;padding-top:0;padding-bottom:0}
+.items{max-height:640px;overflow-y:auto;border-top:1px solid var(--line);scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
+.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;column-gap:1rem;padding:.9rem 1.5rem;border-bottom:1px solid var(--line);transition:background .15s}
+.item:last-child{border-bottom:0}
+.item:hover{background:var(--hover)}
+.ext{display:grid;place-items:center;width:42px;height:48px;border-radius:8px 14px 8px 8px;border:1px solid var(--line-strong);background:var(--sunk);color:var(--accent);font:700 .64rem "JetBrains Mono",ui-monospace,monospace;letter-spacing:.03em;text-transform:uppercase}
+.item-body{min-width:0}
+.filename{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.98rem;font-weight:600}
+.metadata{display:block;margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.78rem}
+.item-actions{display:flex;align-items:center;gap:.25rem}
+.empty{padding:4rem 1.5rem;color:var(--muted);text-align:center}
+.empty:not(.plain)::after{content:"Drop a file or a whole folder anywhere on this page to stage it.";display:block;margin-top:.35rem;color:var(--faint);font-size:.84rem}
 
-      .summary {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-        padding: 1rem 1.25rem;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        background: var(--card);
-      }
+.veil{position:fixed;inset:0;z-index:60;display:flex;padding:14px;opacity:0;pointer-events:none;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);transition:opacity .18s}
+.veil.on{opacity:1}
+.veil-box{flex:1;display:grid;place-content:center;gap:.5rem;border:2px dashed var(--accent);border-radius:26px;text-align:center;padding:1.5rem}
+.veil-title{font-size:clamp(2rem,6vw,4rem);font-weight:700;letter-spacing:-.04em;line-height:1}
+.veil-sub{color:var(--muted)}
 
-      .summary-actions {
-        display: flex;
-        gap: 0.75rem;
-      }
+dialog{margin:auto;padding:0;border:1px solid var(--line-strong);border-radius:18px;background:var(--panel);color:var(--text);box-shadow:var(--shadow)}
+dialog::backdrop{background:rgba(5,6,8,.6);backdrop-filter:blur(4px)}
+#viewer{width:min(780px,calc(100vw - 24px))}
+.dlg-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.9rem 1.1rem;border-bottom:1px solid var(--line)}
+.dlg-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.dlg-body{max-height:65vh;padding:1.1rem;overflow:auto;color:var(--muted)}
+.dlg-body pre{color:var(--text);white-space:pre-wrap;word-break:break-word;font:500 .8rem/1.65 "JetBrains Mono",ui-monospace,Menlo,monospace}
+.dlg-body img{display:block;max-width:100%;margin:0 auto;border-radius:10px}
+.dlg-foot{display:flex;justify-content:flex-end;gap:.5rem;padding:.8rem 1.1rem;border-top:1px solid var(--line)}
 
-      .grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2rem;
-      }
+/* centre popup */
+#popup{width:min(480px,calc(100vw - 32px));overflow:hidden;text-align:center}
+#popup[open]{animation:pop .24s cubic-bezier(.2,.9,.3,1.2) both}
+@keyframes pop{from{opacity:0;transform:scale(.92) translateY(8px)}to{opacity:1;transform:none}}
+.pop-inner{padding:2rem 1.75rem 1.4rem}
+.pop-tag{display:inline-block;padding:.2rem .7rem;border:1px solid var(--line-strong);border-radius:999px;color:var(--muted);font-size:.74rem;font-weight:600}
+.pop-tag.ok{color:var(--ok);border-color:var(--ok)}
+.pop-tag.error{color:var(--bad);border-color:var(--bad)}
+.pop-title{margin:.9rem 0 1rem;font-size:.9rem;color:var(--muted)}
+.pop-line{font-size:clamp(1.3rem,4.6vw,1.65rem);font-weight:700;letter-spacing:-.025em;line-height:1.2}
+.pop-tr{margin-top:.8rem;color:var(--muted);font-size:.95rem}
+.pop-tr::before{content:"In English: ";color:var(--faint)}
+.pop-actions{margin-top:1.4rem}
+.pop-timer{height:3px;background:var(--accent);transform-origin:left;animation:drain 6s linear forwards}
+#popup.paused .pop-timer{animation-play-state:paused}
+@keyframes drain{to{transform:scaleX(0)}}
 
-      .card {
-        padding: 1.5rem;
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        background: var(--card);
-      }
+#toasts{position:fixed;right:1.25rem;bottom:calc(1.25rem + env(safe-area-inset-bottom,0px));z-index:80;display:flex;flex-direction:column;gap:.6rem;width:min(380px,calc(100vw - 2.5rem))}
+.toast{display:flex;flex-direction:column;gap:.15rem;padding:.8rem 1rem;border:1px solid var(--line-strong);border-left:3px solid var(--accent);border-radius:12px;background:var(--panel);box-shadow:var(--shadow);font-size:.88rem;animation:pop .22s ease-out both}
+.toast strong{font-weight:600}
+.toast span{color:var(--muted);font-size:.84rem}
+.toast.out{opacity:0;transform:translateY(6px);transition:opacity .25s,transform .25s}
 
-      .tabs {
-        display: flex;
-        gap: 0.5rem;
-        margin-bottom: 1.25rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid var(--border);
-      }
 
-      .tab-button {
-        padding: 0.55rem 1rem;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--background);
-        color: var(--muted);
-        cursor: pointer;
-        font-weight: 600;
-      }
+body{background:radial-gradient(900px 420px at 12% -8%,var(--accent-soft),transparent 70%),var(--bg)}
+.panel{box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 18px 40px -24px rgba(0,0,0,.5)}
+.compose{padding:.5rem 1.6rem 1.7rem}
+.editor{border-radius:14px;border-color:var(--line-strong);background:var(--sunk);box-shadow:0 1px 0 rgba(255,255,255,.03) inset}
+.editor textarea{font-size:.9rem;line-height:1.75;caret-color:var(--accent)}
+.editor-foot{padding:.6rem 1.1rem;background:color-mix(in srgb,var(--panel) 60%,var(--sunk))}
+#filename{height:46px;margin-bottom:1.3rem;border-radius:12px}
+.btn-primary{background:linear-gradient(180deg,var(--accent-strong),var(--accent));box-shadow:0 8px 20px -10px var(--accent)}
+.btn-primary:hover:not(:disabled){transform:translateY(-1px)}
+.dropzone{padding:2.6rem 1.25rem 1.8rem;border-radius:16px;background:radial-gradient(300px 120px at 50% 0,var(--accent-soft),transparent 80%),var(--sunk)}
+.dz-icon{width:60px;height:60px;border-radius:16px;box-shadow:0 10px 24px -14px var(--accent)}
+.item{position:relative}
+.item::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--accent);opacity:0;transition:opacity .15s}
+.item:hover::before{opacity:1}
+.pop-inner{padding:2.2rem 2rem 1.6rem}
+.pop-line{font-size:clamp(1.25rem,4.2vw,1.55rem)}
+.pop-tr{padding:.75rem 1rem;border:1px solid var(--line);border-radius:12px;background:var(--sunk)}
+@media (max-width:960px){.layout{grid-template-columns:1fr}.compose{position:static}.index{min-height:0}}
+@media (max-width:640px){
+  .shell{padding-left:16px;padding-right:16px}
+  .top{flex-direction:column;align-items:stretch;gap:1rem;margin-bottom:1.5rem}
+  .top-side{justify-content:space-between}
+  .compose{padding:.25rem 1rem 1.1rem}
+  .tabs{gap:0}.tab-button{flex:1;text-align:center}
+  .index-head,.summary,.toolbar{padding-left:1rem;padding-right:1rem}
+  .index-head{flex-direction:column;align-items:flex-start;gap:.75rem}
+  .item{grid-template-columns:auto minmax(0,1fr);padding:.85rem 1rem;row-gap:.6rem}
+  .item-actions{grid-column:1/-1;flex-wrap:wrap}.item-actions .push{margin-left:auto}
+  .btn-sm{min-height:36px}.pickers .btn{flex:1}
+  #toasts{right:12px;left:12px;width:auto}
+  .editor-foot kbd{display:none}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="veil" id="veil" aria-hidden="true"><div class="veil-box">
+  <p class="veil-title">Release to stage</p><p class="veil-sub">Files and whole folders both work.</p>
+</div></div>
 
-      .tab-button.active {
-        border-color: var(--primary);
-        background: var(--primary);
-        color: white;
-      }
+<main class="shell">
+  <header class="top">
+    <div>
+      <h1>Obsidian Relay</h1>
+      <p class="subtitle">Aster packets, transient staging, and sealed retrieval</p>
+    </div>
+    <div class="top-side">
+      <span class="badge">Drift Channel Active</span>
+      <button type="button" id="theme-toggle" class="btn btn-icon" aria-label="Toggle theme">Theme</button>
+    </div>
+  </header>
 
-      label {
-        display: block;
-        margin-bottom: 0.35rem;
-        color: var(--muted);
-        font-size: 0.85rem;
-      }
+  <section class="layout">
+    <div class="panel compose">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab-button active" data-tab="text-tab" onclick="switchTab('text-tab', this)">Lumen Input</button>
+        <button type="button" class="tab-button" data-tab="file-tab" onclick="switchTab('file-tab', this)">Quill Transfer</button>
+      </div>
 
-      input[type="text"],
-      input[type="file"],
-      textarea {
-        width: 100%;
-        margin-bottom: 1rem;
-        padding: 0.75rem;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        outline: none;
-        background: var(--background);
-        color: white;
-      }
+      <div id="text-tab">
+        <form id="paste-form" action="{{ url_for('create_paste') }}" method="POST">
+          <label for="filename">Filename</label>
+          <input id="filename" type="text" name="filename" placeholder="notes.txt" autocomplete="off" />
 
-      textarea {
-        min-height: 220px;
-        resize: vertical;
-        font-family: monospace;
-      }
+          <label for="content">Content</label>
+          <div class="editor">
+            <textarea id="content" name="content" placeholder="Paste text, code, logs, or markdown..." spellcheck="false" required></textarea>
+            <div class="editor-foot">
+              <span id="char-count">0 characters &middot; 0 lines</span>
+              <span><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to commit</span>
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primary">Commit Lumen</button>
+        </form>
+      </div>
 
-      input:focus,
-      textarea:focus {
-        border-color: var(--primary);
-      }
-
-      .dropzone {
-        margin-bottom: 1rem;
-        padding: 2rem 1rem;
-        border: 2px dashed var(--border);
-        border-radius: 10px;
-        background: var(--background);
-        text-align: center;
-      }
-
-      .dropzone p {
-        margin-bottom: 0.75rem;
-      }
-
-      .help-text {
-        color: var(--muted);
-        font-size: 0.8rem;
-      }
-
-      button,
-      .button {
-        display: inline-flex;
-        justify-content: center;
-        align-items: center;
-        padding: 0.65rem 1.25rem;
-        border: none;
-        border-radius: 8px;
-        cursor: pointer;
-        text-decoration: none;
-        font-weight: 600;
-      }
-
-      .primary-button {
-        width: 100%;
-        background: var(--primary);
-        color: white;
-      }
-
-      .primary-button:hover {
-        background: var(--primary-hover);
-      }
-
-      .success-button {
-        background: var(--success);
-        color: white;
-      }
-
-      .secondary-button {
-        background: #334155;
-        color: #cbd5e1;
-      }
-
-      .danger-button {
-        background: transparent;
-        color: #f87171;
-      }
-
-      .items {
-        max-height: 560px;
-        overflow-y: auto;
-      }
-
-      .item {
-        margin-bottom: 0.75rem;
-        padding: 1rem;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: var(--background);
-      }
-
-      .item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 1rem;
-      }
-
-      .filename {
-        display: block;
-        margin-bottom: 0.35rem;
-        color: #818cf8;
-        font-family: monospace;
-        word-break: break-word;
-      }
-
-      .metadata {
-        color: var(--muted);
-        font-size: 0.78rem;
-      }
-
-      .item-actions {
-        display: flex;
-        gap: 0.5rem;
-        margin-top: 0.8rem;
-      }
-
-      .item-actions a,
-      .item-actions button {
-        padding: 0.4rem 0.7rem;
-        font-size: 0.8rem;
-      }
-
-      .empty {
-        padding: 3rem 1rem;
-        color: var(--muted);
-        text-align: center;
-      }
-
-      #upload-status {
-        margin-top: 1rem;
-        color: var(--muted);
-        font-size: 0.85rem;
-        text-align: center;
-      }
-
-      #file-info,
-      #file-preview {
-        width: 100%;
-        margin-top: 1rem;
-        padding: 0.85rem;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: var(--background);
-        color: var(--muted);
-        font: 0.78rem/1.5 monospace;
-        overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-
-      #file-preview {
-        max-height: 220px;
-      }
-
-      @media (max-width: 800px) {
-        header {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-
-        .summary {
-          align-items: flex-start;
-          flex-direction: column;
-        }
-
-        .grid {
-          grid-template-columns: 1fr;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <main class="container">
-      <header>
-        <div>
-          <h1>Obsidian Relay</h1>
-          <p class="subtitle">
-            Aster packets, transient staging, and sealed retrieval
-          </p>
+      <div id="file-tab" style="display:none">
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Select files">
+          <div class="dz-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg></div>
+          <p>Drop files or folders here</p>
+          <p class="help-text">Sent as a raw HTTP stream. No multipart/form-data.</p>
+          <input id="file-input" class="sr" type="file" multiple tabindex="-1" />
+          <input id="folder-input" class="sr" type="file" webkitdirectory directory multiple tabindex="-1" />
+          <div class="pickers">
+            <button type="button" id="pick-files" class="btn">Select files</button>
+            <button type="button" id="pick-folder" class="btn">Select folder</button>
+          </div>
         </div>
 
-        <span class="badge">Drift Channel Active</span>
-      </header>
+        <div class="queue-wrap" id="queue-wrap" hidden>
+          <div class="queue-head">
+            <span><strong id="queue-count">0</strong> queued <span id="queue-size"></span></span>
+            <button type="button" id="queue-clear" class="btn btn-quiet btn-sm">Clear queue</button>
+          </div>
+          <ul class="queue" id="queue"></ul>
+        </div>
 
-      <section class="summary">
-        <span>
-          <strong>{{ items|length }}</strong>
-          item(s) stored in RAM
-          <strong>({{ total_size }})</strong>
-        </span>
+        <div class="send-row"><button id="upload-button" type="button" class="btn btn-primary">Send Quill</button></div>
+        <div class="progress" id="progress" hidden><div></div></div>
+        <pre id="file-info" hidden></pre>
+        <pre id="file-preview" hidden></pre>
+        <p id="upload-status"></p>
+      </div>
+    </div>
 
-        {% if items %}
-        <div class="summary-actions">
-          <form
-            action="{{ url_for('clear_store') }}"
-            method="POST"
-            onsubmit="return confirm('Delete all items from memory?');"
-          >
-            <button type="submit" class="secondary-button">Reset Drift</button>
+    <div class="panel index">
+      <div class="index-head">
+        <h3>Aster Index</h3>
+        <div class="summary-actions" id="summary-actions" {% if not items %}hidden{% endif %}>
+          <a href="{{ url_for('download_zip') }}" class="btn btn-sm">Download all (ZIP)</a>
+          <form id="clear-form" action="{{ url_for('clear_store') }}" method="POST">
+            <button type="submit" class="btn btn-sm btn-danger">Reset Drift</button>
           </form>
         </div>
-        {% endif %}
-      </section>
+      </div>
+      <p class="summary"><strong id="count">{{ items|length }}</strong> item(s) stored in RAM <strong id="total">({{ total_size }})</strong></p>
 
-      <section class="grid">
-        <div class="card">
-          <div class="tabs">
-            <button
-              type="button"
-              class="tab-button active"
-              onclick="switchTab('text-tab', this)"
-            >
-              Lumen Input
-            </button>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Search files..." autocomplete="off" />
+        <span class="select">
+          <select id="sort" aria-label="Sort">
+            <option value="new">Newest</option>
+            <option value="old">Oldest</option>
+            <option value="name">Name</option>
+            <option value="size">Largest</option>
+          </select>
+        </span>
+      </div>
 
-            <button
-              type="button"
-              class="tab-button"
-              onclick="switchTab('file-tab', this)"
-            >
-              Quill Transfer
-            </button>
-          </div>
+      <div class="items"><div class="empty">The index is currently quiet.</div></div>
+    </div>
+  </section>
+</main>
 
-          <div id="text-tab">
-            <form id="paste-form" action="{{ url_for('create_paste') }}" method="POST">
-              <label for="filename"> Filename </label>
+<dialog id="viewer">
+  <div class="dlg-head"><strong id="viewer-title"></strong><button type="button" class="btn btn-sm" id="viewer-close">Close</button></div>
+  <div class="dlg-body" id="viewer-body"></div>
+  <div class="dlg-foot">
+    <button type="button" class="btn btn-sm" id="viewer-copy">Copy</button>
+    <button type="button" class="btn btn-sm" id="viewer-download">Retrieve</button>
+  </div>
+</dialog>
 
-              <input
-                id="filename"
-                type="text"
-                name="filename"
-                placeholder="notes.txt"
-              />
+<dialog id="popup" aria-live="polite">
+  <div class="pop-inner">
+    <span class="pop-tag" id="pop-tag"></span>
+    <p class="pop-title" id="pop-title"></p>
+    <p class="pop-line" id="pop-line"></p>
+    <p class="pop-tr" id="pop-tr"></p>
+    <div class="pop-actions"><button type="button" class="btn btn-primary" id="pop-close">Fine, I accept</button></div>
+  </div>
+  <div class="pop-timer" id="pop-timer"></div>
+</dialog>
+<div id="toasts" aria-live="polite"></div>
 
-              <label for="content"> Content </label>
+<script>
+function switchTab(tabId, btn) {
+  document.getElementById("text-tab").style.display = tabId === "text-tab" ? "block" : "none";
+  document.getElementById("file-tab").style.display = tabId === "file-tab" ? "block" : "none";
+  document.querySelectorAll(".tab-button").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+}
 
-              <textarea
-                id="content"
-                name="content"
-                placeholder="Paste text, code, logs, or markdown..."
-                required
-              ></textarea>
+const fileInput = document.getElementById("file-input");
+const folderInput = document.getElementById("folder-input");
+const fileInfo = document.getElementById("file-info");
+const filePreview = document.getElementById("file-preview");
+const maxPreviewBytes = 4096;
+const textFilePattern = /\.(txt|log|md|json|js|jsx|ts|tsx|py|java|c|cpp|h|css|html|xml|yaml|yml|csv|svg)$/i;
+const state = { items: [], q: "", sort: "new", viewing: null, queue: [] };
 
-              <button type="submit" class="primary-button">
-                Commit Lumen
-              </button>
-            </form>
-          </div>
+/* ---------- helpers ---------- */
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+function bytesToHex(bytes) { return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(" "); }
+function explainError(error) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  try { return JSON.stringify(error); } catch { return "Unknown browser error."; }
+}
+function formatSize(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB"]; let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i ? 1 : 0)} ${u[i]}`;
+}
+function timeAgo(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (isNaN(s)) return "";
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+function isText(m) { return (m.type || "").startsWith("text/") || textFilePattern.test(m.name || ""); }
+function extOf(name) { const m = /\.([a-z0-9]{1,4})$/i.exec(name || ""); return m ? m[1] : "file"; }
 
-          <div id="file-tab" style="display: none">
-            <div class="dropzone">
-              <p>Select a file to send as a raw HTTP stream</p>
+/* ---------- Telugu / Hindi remarks (romanised): [language, line, English] ---------- */
+const T = "Telugu", H = "Hindi";
+const combo = {
+  commit: {
+    [T]: {
+      a: [["Arey baboi!","Oh my!"],["Ayyo ramaa!","Oh my god!"],["Em ra idi!","What is this!"],["Chi siggu ledu ra miku!","Have you no shame!"],["Abba!","Wow!"],["Arre deva!","Oh lord!"],["Ayyayyo!","Oh no no!"],["Hmm, chala bagundi ra.","Hmm, very nice, man."]],
+      b: [["Server ki kuda navvu aagatledu.","Even the server can't stop laughing."],["Idi content aa leka accident aa?","Is this content or an accident?"],["RAM ki kuda bhayam vestundi.","Even the RAM is getting scared."],["Nee confidence mundu Google kuda fail.","Google fails in front of your confidence."],["Idi chaduvthe doctor ki fees ivvali.","Reading this needs a doctor's fee."],["Ilanti paste chesi hero anukuntunnav.","Pasting stuff like this and thinking you're a hero."],["Next time alochinchi kottu ra.","Think before you type next time."],["Nee typing speed kante nee logic slow.","Your logic is slower than your typing."]]
+    },
+    [H]: {
+      a: [["Arre bhai bhai bhai!","Bro bro bro!"],["Hey Bhagwan!","Oh God!"],["Kya kar diya tune!","What have you done!"],["Kuch toh sharam kar le!","Have some shame!"],["Wah wah wah!","Wow wow wow!"],["Abe yaar!","Oh come on!"],["Ho gaya tera?","Done with yours?"],["Haye re!","Oh dear!"]],
+      b: [["Server bhi hans hans ke lot-pot ho gaya.","Even the server rolled over laughing."],["Ye content hai ya galti se daba diya?","Is this content or an accidental key press?"],["RAM ro rahi hai, CPU bol raha hai bas kar.","The RAM is crying, the CPU says stop."],["Tera confidence dekh ke WiFi bhi sharma gaya.","Seeing your confidence, even the WiFi blushed."],["Isse achha toh ration list likh leta.","You'd have been better off writing a grocery list."],["Itna bekaar, phir bhi save. Server bada dayalu hai.","So useless, yet saved. The server is generous."],["Agli baar sochke type kar, sochna free hai.","Think before typing next time, thinking is free."],["Sapne mein bhi koi ye read nahi karega.","Nobody will read this even in their dreams."]]
+    }
+  },
+  upload: {
+    [T]: {
+      a: null,
+      b: [["Ee files chusi folder ki kuda bore kottindi.","Even the folder got bored of these files."],["Final_v2_real_final ante nuvve ra.","Final_v2_real_final, that's you."],["Backup aa leka hoarding aa?","Backup or hoarding?"],["Anni files enduku ra, exam ledu kada.","Why so many files, there's no exam."],["Naming system chuste kallu tirugutunnayi.","Your naming system makes my eyes spin."],["Sort cheyyakunda pettav, hats off.","Uploaded without sorting, hats off."],["Mee desktop ki chaala kashtam ra.","Tough life for your desktop."],["Storage kante nee sahanam ekkuva.","Your patience is bigger than your storage."]]
+    },
+    [H]: {
+      a: null,
+      b: [["Itni files? Bhai godown khol raha hai kya?","So many files? Are you opening a warehouse?"],["Final_final_real_final wala insaan mil gaya.","Found the Final_final_real_final guy."],["Folder ka naam dekh ke dimaag ghoom gaya.","The folder name spun my head."],["Backup hai ya kabaad?","Backup or scrap?"],["Naming dekh ke sabziwala bhi pass kar dega.","Even the vegetable vendor would pass on this naming."],["Sab upload hua, bas tera time waste hua.","All uploaded, only your time was wasted."],["Storage bhar jayega, tera confidence nahi.","Storage will fill up, your confidence won't."],["Itna kuch rakh ke bhi kuch nahi mila na?","Kept all this and still found nothing, right?"]]
+    }
+  }
+};
+combo.upload[T].a = combo.commit[T].a;
+combo.upload[H].a = combo.commit[H].a;
+const fixed = {
+  remove: [
+    [T,"Poyindi poyindi, ex laga. Malli raadu.","Gone, like an ex. It won't come back."],
+    [T,"Delete chesav ra. Ee dhairyam important decisions lo chupinchu.","Deleted. Show this courage in important decisions too."],
+    [T,"Kaneesam oka funeral ayina pettu ra.","At least hold a funeral for it."],
+    [T,"Ippudu santhosham aa? Nuvvu chesindi chusava?","Happy now? Did you see what you did?"],
+    [T,"Delete ayyindi, kani nee tappulu inka unnai.","Deleted, but your mistakes are still here."],
+    [T,"Aa file ki shanti kalagali ra.","May that file rest in peace."],
+    [H,"Delete ho gaya, tere attendance ki tarah kisi ko fark nahi pada.","Deleted, like your attendance, nobody noticed."],
+    [H,"Gaya, ab rone se kuch nahi hoga.","Gone, crying won't help now."],
+    [H,"Ek click mein itni badi baat? Dil bada hai tera.","Such a big call in one click? You've got guts."],
+    [H,"File ko shraddhanjali, 2 minute ka maun.","Tribute to the file, two minutes of silence."],
+    [H,"Delete toh kar diya, ab backup ka sapna dekh.","You deleted it, now dream of a backup."],
+    [H,"Itni bhi kya nafrat thi file se?","What hatred did you have for the file?"]
+  ],
+  reset: [
+    [T,"Anni poyayi ra. Ippudu em chestav?","Everything's gone. What will you do now?"],
+    [T,"Reset button nokkav, jeevithamlo kuda ilage cheyyi.","You pressed reset, do the same in life."],
+    [T,"Mothham saaf. Nee manasu kante clean ga undi.","All clean. Cleaner than your conscience."],
+    [T,"Server kuda fresh start kosam edustundi.","Even the server cries for a fresh start."],
+    [T,"Boom! Anni gaayab. Magic chesav ra.","Boom! All vanished. You did magic."],
+    [H,"Sab saaf. Kaash zindagi mein bhi reset button hota.","All wiped. If only life had a reset button."],
+    [H,"Ek hi click mein sab khatam, tu bada khatarnak hai.","Everything gone in one click, you're dangerous."],
+    [H,"Server ne kaha: bhai itna bhi kya gussa?","The server said: bro, why so angry?"],
+    [H,"Sab gayab, jaise mahine ke aakhri din salary.","All gone, like salary at month end."],
+    [H,"Safai abhiyan safal raha.","The cleanliness drive was a success."]
+  ],
+  copy: [
+    [T,"Copy chesav, ippudu paste cheyyi. Aagaku.","Copied. Now paste it. Don't stop."],
+    [T,"Copy kottav, kani credit evariki ivvav?","You copied it, but who gets the credit?"],
+    [T,"Clipboard lo pettav, ippudu marchipoku ra.","Put it in the clipboard, now don't forget."],
+    [T,"Copy-paste engineer ki salute.","Salute to the copy-paste engineer."],
+    [H,"Copy ho gaya, ab paste karke dikha.","Copied, now go paste it and show us."],
+    [H,"Ctrl+C ka jaadugar.","The wizard of Ctrl+C."],
+    [H,"Copy kiya, par samajh bhi aaya kya?","You copied it, but did you understand?"],
+    [H,"Copy-paste se hi ghar chalta hai, hai na?","Copy-paste pays the bills, right?"]
+  ],
+  fail: [
+    [T,"Em ayyindi ra? Idi nee valla aa, network valla aa?","What happened? Is it your fault or the network's?"],
+    [T,"Fail ayyindi. Nee luck laage.","It failed. Just like your luck."],
+    [T,"Server cheppindi: nenu em cheyyali ra baboi.","The server said: what should I even do, dear."],
+    [T,"Mari idi kuda nee tappe ani anukuntunna.","I'm guessing this is also your mistake."],
+    [T,"Retry kottu ra, miracle jaragochu.","Hit retry, a miracle might happen."],
+    [T,"Network ki kuda nee meeda nammakam ledu.","Even the network doesn't trust you."],
+    [T,"Idi fail kaadu, server nee meeda prank chesindi.","This isn't failure, the server pranked you."],
+    [H,"Arre yaar, kuch toh gadbad hai. Phir se try kar.","Oh man, something's off. Try again."],
+    [H,"Fail ho gaya. Ab blame kisko karega, network ko?","It failed. Who will you blame, the network?"],
+    [H,"Server bola: main chhutti pe hoon.","The server said: I'm on leave."],
+    [H,"Ye error nahi, server ka mood off hai.","This isn't an error, the server's mood is off."],
+    [H,"Dobara try kar, shayad is baar bhagwan sun le.","Try again, maybe God listens this time."],
+    [H,"Kismat ka khel hai bhai, kabhi chalta hai kabhi nahi.","It's the game of luck, bro. Sometimes it works, sometimes not."],
+    [H,"Tu jahan haath lagata hai wahan bug aa jata hai.","Wherever you touch, a bug appears."]
+  ],
+  welcome: [
+    [T,"Lopaliki randi, Obsidian Relay ki swagatham.","Please come in, welcome to Obsidian Relay."],
+    [T,"Lopaliki randi. Coffee ledu, kani storage undi.","Please come in. No coffee, but there's storage."],
+    [T,"Lopaliki randi. Chappals bayata vadali ra.","Please come in. Leave your slippers outside."],
+    [H,"Aaiye aaiye, padhariye. RAM khaali hai.","Come in, come in, the RAM is empty."],
+    [H,"Swagat nahi karenge, kaam karo.","We won't welcome you, get to work."]
+  ]
+};
+const lastRemark = {};
+function remark(kind) {
+  let pick, key;
+  if (combo[kind]) {
+    do {
+      const lang = Math.random() < 0.5 ? T : H, c = combo[kind][lang];
+      const a = c.a[Math.floor(Math.random() * c.a.length)], b = c.b[Math.floor(Math.random() * c.b.length)];
+      pick = [lang, `${a[0]} ${b[0]}`, `${a[1]} ${b[1]}`]; key = pick[1];
+    } while (key === lastRemark[kind]);
+    lastRemark[kind] = key; return pick;
+  }
+  const pool = fixed[kind];
+  do { pick = pool[Math.floor(Math.random() * pool.length)]; } while (pool.length > 1 && pick[1] === lastRemark[kind]);
+  lastRemark[kind] = pick[1]; return pick;
+}
 
-              <p class="help-text">This does not use multipart/form-data.</p>
+/* ---------- centre popup ---------- */
+const popup = document.getElementById("popup");
+let popTimer = null;
+function showPopup(kind, title, tone) {
+  const [lang, line, tr] = remark(kind);
+  const tag = document.getElementById("pop-tag");
+  tag.textContent = lang; tag.className = "pop-tag " + (tone || "");
+  document.getElementById("pop-title").textContent = title;
+  document.getElementById("pop-line").textContent = line;
+  document.getElementById("pop-tr").textContent = tr;
+  const timer = document.getElementById("pop-timer");
+  timer.style.animation = "none"; void timer.offsetWidth; timer.style.animation = "";
+  if (!popup.open) popup.showModal();
+  clearTimeout(popTimer);
+  popTimer = setTimeout(() => popup.open && popup.close(), 6000);
+}
+document.getElementById("pop-close").addEventListener("click", () => popup.close());
+popup.addEventListener("click", (e) => { if (e.target === popup) popup.close(); });
+popup.addEventListener("close", () => clearTimeout(popTimer));
+popup.addEventListener("mouseenter", () => { clearTimeout(popTimer); popup.classList.add("paused"); });
+popup.addEventListener("mouseleave", () => { popup.classList.remove("paused"); popTimer = setTimeout(() => popup.open && popup.close(), 2500); });
 
-              <input id="file-input" type="file" />
+function toast(message, line) {
+  const node = document.createElement("div");
+  node.className = "toast";
+  const t = document.createElement("strong"); t.textContent = message; node.appendChild(t);
+  if (line) { const s = document.createElement("span"); s.textContent = line; node.appendChild(s); }
+  const holder = document.getElementById("toasts");
+  holder.appendChild(node);
+  while (holder.children.length > 3) holder.firstElementChild.remove();
+  setTimeout(() => node.classList.add("out"), 3800);
+  setTimeout(() => node.remove(), 4100);
+}
 
-              <button id="upload-button" type="button" class="primary-button">
-                Send Quill
-              </button>
+/* ---------- theme ---------- */
+document.getElementById("theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("relay-theme", next); } catch (e) {}
+});
 
-              <pre id="file-info" hidden></pre>
-              <pre id="file-preview" hidden></pre>
-              <p id="upload-status"></p>
-            </div>
-          </div>
-        </div>
+/* ---------- encryption (unchanged) ---------- */
+function createEnvelope(fileMetadata, content) {
+  return {
+    version: 1,
+    metadata: { ...fileMetadata, encrypted_at: new Date().toISOString() },
+    content: bytesToBase64(content)
+  };
+}
+async function cloakEnvelope(envelope) {
+  const keyResponse = await fetch("/aurora/orbit", { credentials: "same-origin", cache: "no-store" });
+  if (!keyResponse.ok) throw new Error(`Could not load encryption key (HTTP ${keyResponse.status}).`);
+  const publicKey = await crypto.subtle.importKey("spki", await keyResponse.arrayBuffer(),
+    { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
+  const contentKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, contentKey,
+    new TextEncoder().encode(JSON.stringify(envelope)));
+  const rawKey = await crypto.subtle.exportKey("raw", contentKey);
+  const wrappedKey = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, publicKey, rawKey);
+  return JSON.stringify({
+    version: 2,
+    wrapped_key: bytesToBase64(new Uint8Array(wrappedKey)),
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(new Uint8Array(sealed))
+  });
+}
+function sendRaw(body, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/quasar/relay");
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let result = {};
+      try { result = JSON.parse(xhr.responseText); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(result);
+      else reject(new Error(result.error || "Upload failed."));
+    };
+    xhr.onerror = () => reject(new TypeError("network"));
+    xhr.send(body);
+  });
+}
 
-        <div class="card">
-          <h3>Aster Index</h3>
+/* ---------- file preview ---------- */
+async function inspectFile(file) {
+  const metadata = {
+    name: file.name, type: file.type || "unknown", size_bytes: file.size,
+    last_modified: new Date(file.lastModified).toISOString()
+  };
+  fileInfo.textContent = JSON.stringify(metadata, null, 2);
+  fileInfo.hidden = false;
+  const bytes = new Uint8Array(await file.slice(0, maxPreviewBytes).arrayBuffer());
+  if (file.type.startsWith("text/") || textFilePattern.test(file.name)) {
+    filePreview.textContent = `Text preview (first ${bytes.length} bytes):\n\n${new TextDecoder().decode(bytes)}`;
+  } else {
+    filePreview.textContent = `Binary preview (first ${bytes.length} bytes, hex):\n\n${bytesToHex(bytes)}`;
+  }
+  filePreview.hidden = false;
+}
 
-          <div class="items">
-            {% for item_id, item in items.items() %}
-            <article class="item">
-              <div class="item-header">
-                <div>
-                  <strong class="filename">Encrypted item {{ item.id }}</strong>
-                </div>
-                <span class="metadata">{{ item.encrypted_size }} bytes encrypted</span>
-              </div>
+/* ---------- queue ---------- */
+const queueWrap = document.getElementById("queue-wrap");
+const queueList = document.getElementById("queue");
 
-              <div class="item-actions">
-                <button
-                  type="button"
-                  class="button secondary-button client-view"
-                  data-item-id="{{ item.id }}"
-                >
-                  Open
-                </button>
+function renderQueue() {
+  const total = state.queue.reduce((s, q) => s + q.file.size, 0);
+  queueWrap.hidden = !state.queue.length;
+  document.getElementById("queue-count").textContent = state.queue.length;
+  document.getElementById("queue-size").textContent = state.queue.length ? `(${formatSize(total)})` : "";
+  queueList.replaceChildren();
+  state.queue.forEach((entry, index) => {
+    const li = document.createElement("li");
+    const ext = document.createElement("div"); ext.className = "ext"; ext.textContent = extOf(entry.file.name);
+    const body = document.createElement("div"); body.className = "q-body";
+    const name = document.createElement("span"); name.className = "q-name"; name.textContent = entry.file.name;
+    const meta = document.createElement("span"); meta.className = "q-meta";
+    meta.textContent = `${entry.path || "root"} | ${formatSize(entry.file.size)}`;
+    body.append(name, meta);
+    li.append(ext, body);
+    if (entry.status) {
+      const st = document.createElement("span"); st.className = "q-state"; st.textContent = entry.status;
+      li.append(st);
+    } else {
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "btn btn-danger btn-sm"; rm.textContent = "Remove";
+      rm.addEventListener("click", () => { state.queue.splice(index, 1); renderQueue(); });
+      li.append(rm);
+    }
+    queueList.appendChild(li);
+  });
+  if (!state.queue.length) { fileInfo.hidden = true; filePreview.hidden = true; }
+}
 
-                <button
-                  type="button"
-                  class="button success-button client-download"
-                  data-item-id="{{ item.id }}"
-                >
-                  Retrieve
-                </button>
+async function addToQueue(entries) {
+  if (!entries.length) return;
+  const key = (q) => `${q.path}|${q.file.name}|${q.file.size}|${q.file.lastModified}`;
+  const seen = new Set(state.queue.map(key));
+  let last = null;
+  for (const entry of entries) {
+    if (seen.has(key(entry))) continue;
+    seen.add(key(entry)); state.queue.push(entry); last = entry;
+  }
+  renderQueue();
+  document.getElementById("upload-status").textContent = "";
+  if (last) {
+    try { await inspectFile(last.file); }
+    catch (error) { filePreview.textContent = `Could not read a preview: ${error.message}`; filePreview.hidden = false; }
+  }
+}
 
-                <form
-                  action="{{ url_for('delete_item', item_id=item.id) }}"
-                  method="POST"
-                >
-                  <button type="submit" class="danger-button">Delete</button>
-                </form>
-              </div>
-            </article>
-            {% else %}
-            <div class="empty">
-              The index is currently quiet.
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-      </section>
-    </main>
+function showFileTab() { switchTab("file-tab", document.querySelector('[data-tab="file-tab"]')); }
 
-    <script>
-      function switchTab(tabId, selectedButton) {
-        document.getElementById("text-tab").style.display =
-          tabId === "text-tab" ? "block" : "none";
+fileInput.addEventListener("change", () => {
+  const picked = Array.from(fileInput.files).map((file) => ({ file, path: "" }));
+  fileInput.value = ""; addToQueue(picked);
+});
+folderInput.addEventListener("change", () => {
+  const picked = Array.from(folderInput.files).map((file) => ({ file, path: file.webkitRelativePath || "" }));
+  folderInput.value = ""; addToQueue(picked);
+});
+document.getElementById("pick-files").addEventListener("click", (e) => { e.stopPropagation(); fileInput.click(); });
+document.getElementById("pick-folder").addEventListener("click", (e) => { e.stopPropagation(); folderInput.click(); });
+document.getElementById("queue-clear").addEventListener("click", () => { state.queue = []; renderQueue(); });
 
-        document.getElementById("file-tab").style.display =
-          tabId === "file-tab" ? "block" : "none";
+/* ---------- drag and drop ---------- */
+const dropzone = document.getElementById("dropzone");
+const veil = document.getElementById("veil");
+let dragDepth = 0;
+dropzone.addEventListener("click", () => fileInput.click());
+dropzone.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target === dropzone) { e.preventDefault(); fileInput.click(); }
+});
+function hasFiles(e) { return !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")); }
+function endDrag() { dragDepth = 0; veil.classList.remove("on"); dropzone.classList.remove("dragging"); }
+function readBatch(reader) { return new Promise((res, rej) => reader.readEntries(res, rej)); }
+function entryToFile(entry) { return new Promise((res, rej) => entry.file(res, rej)); }
+async function walkEntry(entry, prefix, out) {
+  if (entry.isFile) {
+    const file = await entryToFile(entry);
+    out.push({ file, path: prefix ? prefix + entry.name : "" });
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader(); let batch;
+    do {
+      batch = await readBatch(reader);
+      for (const child of batch) await walkEntry(child, `${prefix}${entry.name}/`, out);
+    } while (batch.length);
+  }
+}
+window.addEventListener("dragenter", (e) => {
+  if (!hasFiles(e)) return; e.preventDefault(); dragDepth++;
+  veil.classList.add("on"); dropzone.classList.add("dragging");
+});
+window.addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
+window.addEventListener("dragleave", (e) => {
+  if (!hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) endDrag();
+});
+window.addEventListener("drop", async (e) => {
+  if (!hasFiles(e)) return; e.preventDefault();
+  const dt = e.dataTransfer, entries = [];
+  if (dt.items) for (const item of dt.items) {
+    if (item.kind === "file" && item.webkitGetAsEntry) { const en = item.webkitGetAsEntry(); if (en) entries.push(en); }
+  }
+  const fallback = Array.from(dt.files || []);
+  endDrag(); showFileTab();
+  const status = document.getElementById("upload-status"), collected = [];
+  try {
+    if (entries.length) {
+      status.textContent = "Reading dropped items...";
+      for (const en of entries) await walkEntry(en, "", collected);
+    } else fallback.forEach((file) => collected.push({ file, path: "" }));
+    status.textContent = "";
+    await addToQueue(collected);
+  } catch (error) { status.textContent = `Could not read dropped items: ${explainError(error)}`; }
+});
 
-        document.querySelectorAll(".tab-button").forEach((button) => {
-          button.classList.remove("active");
-        });
+/* ---------- upload ---------- */
+document.getElementById("upload-button").addEventListener("click", async () => {
+  const uploadStatus = document.getElementById("upload-status");
+  const uploadButton = document.getElementById("upload-button");
+  const progress = document.getElementById("progress");
+  const bar = progress.firstElementChild;
+  const queue = state.queue.slice();
+  if (!queue.length) { uploadStatus.textContent = "Please select a file first."; return; }
 
-        selectedButton.classList.add("active");
-      }
-
-      const fileInput = document.getElementById("file-input");
-      const fileInfo = document.getElementById("file-info");
-      const filePreview = document.getElementById("file-preview");
-      const maxPreviewBytes = 4096;
-      const textFilePattern =
-        /\\.(txt|log|md|json|js|jsx|ts|tsx|py|java|c|cpp|h|css|html|xml|yaml|yml|csv|svg)$/i;
-
-      function bytesToBase64(bytes) {
-        let binary = "";
-        for (let index = 0; index < bytes.length; index += 0x8000) {
-          binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-        }
-        return btoa(binary);
-      }
-
-      function base64ToBytes(value) {
-        const binary = atob(value);
-        return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-      }
-
-      function createEnvelope(fileMetadata, content) {
-        return {
-          version: 1,
-          metadata: {
-            ...fileMetadata,
-            encrypted_at: new Date().toISOString()
-          },
-          content: bytesToBase64(content)
-        };
-      }
-
-      async function cloakEnvelope(envelope) {
-        const keyResponse = await fetch("/aurora/orbit", {
-          credentials: "same-origin",
-          cache: "no-store"
-        });
-        if (!keyResponse.ok) {
-          throw new Error(`Could not load encryption key (HTTP ${keyResponse.status}).`);
-        }
-        const publicKey = await crypto.subtle.importKey(
-          "spki",
-          await keyResponse.arrayBuffer(),
-          { name: "RSA-OAEP", hash: "SHA-256" },
-          false,
-          ["encrypt"]
-        );
-        const contentKey = await crypto.subtle.generateKey(
-          { name: "AES-GCM", length: 256 },
-          true,
-          ["encrypt", "decrypt"]
-        );
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const sealed = await crypto.subtle.encrypt(
-          { name: "AES-GCM", iv },
-          contentKey,
-          new TextEncoder().encode(JSON.stringify(envelope))
-        );
-        const rawKey = await crypto.subtle.exportKey("raw", contentKey);
-        const wrappedKey = await crypto.subtle.encrypt(
-          { name: "RSA-OAEP" },
-          publicKey,
-          rawKey
-        );
-        return JSON.stringify({
-          version: 2,
-          wrapped_key: bytesToBase64(new Uint8Array(wrappedKey)),
-          iv: bytesToBase64(iv),
-          ciphertext: bytesToBase64(new Uint8Array(sealed))
-        });
-      }
-
-      function bytesToHex(bytes) {
-        return Array.from(bytes, (byte) =>
-          byte.toString(16).padStart(2, "0")
-        ).join(" ");
-      }
-
-      function explainError(error) {
-        if (error instanceof Error && error.message) {
-          return error.message;
-        }
-        if (typeof error === "string" && error) {
-          return error;
-        }
-        try {
-          return JSON.stringify(error);
-        } catch {
-          return "Unknown browser error.";
-        }
-      }
-
-      async function inspectFile(file) {
-        const metadata = {
-          name: file.name,
-          type: file.type || "unknown",
-          size_bytes: file.size,
-          last_modified: new Date(file.lastModified).toISOString()
-        };
-
-        console.group("Selected file");
-        console.log("Metadata:", metadata);
-
-        fileInfo.textContent = JSON.stringify(metadata, null, 2);
-        fileInfo.hidden = false;
-
-        const preview = await file.slice(0, maxPreviewBytes).arrayBuffer();
-        const previewBytes = new Uint8Array(preview);
-        const isLikelyText =
-          file.type.startsWith("text/") || textFilePattern.test(file.name);
-
-        if (isLikelyText) {
-          const text = new TextDecoder().decode(previewBytes);
-          console.log("Content preview:", text);
-          filePreview.textContent =
-            `Text preview (first ${previewBytes.length} bytes):\n\n${text}`;
-        } else {
-          const hex = bytesToHex(previewBytes);
-          console.log("Binary preview (hex):", hex);
-          filePreview.textContent =
-            `Binary preview (first ${previewBytes.length} bytes, hex):\n\n${hex}`;
-        }
-
-        console.log(
-          `Preview limited to ${maxPreviewBytes} bytes; full size is ${file.size} bytes.`
-        );
-        console.groupEnd();
-        filePreview.hidden = false;
-      }
-
-      fileInput.addEventListener("change", async () => {
-        const file = fileInput.files[0];
-
-        if (!file) {
-          fileInfo.hidden = true;
-          filePreview.hidden = true;
-          return;
-        }
-
-        try {
-          await inspectFile(file);
-        } catch (error) {
-          console.error("Could not inspect selected file:", error);
-          filePreview.textContent =
-            `Could not read a preview: ${error.message}`;
-          filePreview.hidden = false;
-        }
+  uploadButton.disabled = true; progress.hidden = false;
+  let done = 0;
+  try {
+    for (const entry of queue) {
+      const file = entry.file;
+      uploadStatus.textContent = `Uploading ${done + 1} of ${queue.length}: ${entry.path || file.name}`;
+      bar.style.width = "0";
+      entry.status = "Encrypting..."; renderQueue();
+      const content = new Uint8Array(await file.arrayBuffer());
+      const envelope = createEnvelope({
+        name: file.name, type: file.type || "application/octet-stream", size_bytes: file.size,
+        last_modified: file.lastModified, relative_path: entry.path || file.webkitRelativePath || ""
+      }, content);
+      const cloaked = await cloakEnvelope(envelope);
+      await sendRaw(cloaked, (p) => {
+        bar.style.width = `${Math.round(p * 100)}%`;
+        entry.status = `${Math.round(p * 100)}%`; renderQueue();
       });
+      done++;
+      state.queue.shift(); renderQueue();
+    }
+    uploadStatus.textContent = ""; fileInfo.hidden = true; filePreview.hidden = true;
+    showPopup("upload", `Stored ${done} encrypted item${done > 1 ? "s" : ""} in RAM.`, "ok");
+    await loadEncryptedItems();
+  } catch (error) {
+    state.queue.forEach((q) => delete q.status); renderQueue();
+    const message = error instanceof TypeError
+      ? "The upload request was blocked before reaching the server. Check the network proxy or firewall."
+      : explainError(error);
+    uploadStatus.textContent = `Upload failed: ${message}`;
+    showPopup("fail", "Upload failed", "error");
+    if (done) await loadEncryptedItems();
+  } finally {
+    uploadButton.disabled = false; progress.hidden = true;
+  }
+});
 
-      document
-        .getElementById("upload-button")
-        .addEventListener("click", async () => {
-            const uploadStatus = document.getElementById("upload-status");
-            const uploadButton = document.getElementById("upload-button");
-            const file = fileInput.files[0];
+/* ---------- text editor ---------- */
+const contentField = document.getElementById("content");
+function updateCount() {
+  const v = contentField.value;
+  const lines = v ? v.split("\n").length : 0;
+  const bytes = new TextEncoder().encode(v).length;
+  document.getElementById("char-count").textContent =
+    `${v.length.toLocaleString()} characters \u00b7 ${lines.toLocaleString()} lines \u00b7 ${formatSize(bytes)}`;
+  contentField.style.height = "auto";
+  contentField.style.height = Math.min(Math.max(contentField.scrollHeight, 360), 600) + "px";
+}
+contentField.addEventListener("input", updateCount);
+contentField.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    e.preventDefault(); document.getElementById("paste-form").requestSubmit();
+  } else if (e.key === "Tab" && !e.shiftKey) {
+    e.preventDefault();
+    const s = contentField.selectionStart, en = contentField.selectionEnd;
+    contentField.setRangeText("  ", s, en, "end"); updateCount();
+  }
+});
+document.getElementById("paste-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = form.querySelector("button[type=submit]");
+  const content = form.elements.content.value;
+  const filename = form.elements.filename.value.trim() || "paste.txt";
+  if (!content) return;
+  submit.disabled = true;
+  try {
+    const plaintext = new TextEncoder().encode(content);
+    const envelope = createEnvelope({
+      name: filename, type: "text/plain", size_bytes: plaintext.length,
+      last_modified: Date.now(), relative_path: ""
+    }, plaintext);
+    const cloaked = await cloakEnvelope(envelope);
+    await sendRaw(cloaked);
+    form.reset(); updateCount();
+    showPopup("commit", "Committed to the index.", "ok");
+    await loadEncryptedItems();
+  } catch (error) {
+    showPopup("fail", `Could not encrypt and store content: ${explainError(error)}`, "error");
+  } finally { submit.disabled = false; }
+});
 
-            if (!file) {
-                uploadStatus.textContent = "Please select a file first.";
-                return;
-            }
+/* ---------- index ---------- */
+function renderItems() {
+  const list = document.querySelector(".items");
+  const q = state.q.trim().toLowerCase();
+  const rows = state.items.filter((i) => !q || (i.name || "").toLowerCase().includes(q));
+  const by = {
+    new: (a, b) => new Date(b.encrypted_at) - new Date(a.encrypted_at),
+    old: (a, b) => new Date(a.encrypted_at) - new Date(b.encrypted_at),
+    name: (a, b) => (a.name || "").localeCompare(b.name || ""),
+    size: (a, b) => b.size_bytes - a.size_bytes
+  };
+  rows.sort(by[state.sort]);
+  list.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty" + (state.items.length ? " plain" : "");
+    empty.textContent = state.items.length ? "No files match your search." : "The index is currently quiet.";
+    list.appendChild(empty); return;
+  }
+  for (const item of rows) {
+    const article = document.createElement("article");
+    article.className = "item";
+    article.innerHTML = `
+      <div class="ext"></div>
+      <div class="item-body"><strong class="filename"></strong><span class="metadata"></span></div>
+      <div class="item-actions">
+        <button type="button" class="btn btn-sm" data-a="open">Open</button>
+        <button type="button" class="btn btn-sm" data-a="get">Retrieve</button>
+        <button type="button" class="btn btn-sm" data-a="copy">Copy</button>
+        <button type="button" class="btn btn-sm btn-danger push" data-a="del">Delete</button>
+      </div>`;
+    article.querySelector(".ext").textContent = extOf(item.name);
+    const nameNode = article.querySelector(".filename");
+    nameNode.textContent = item.name; nameNode.title = item.name;
+    article.querySelector(".metadata").textContent =
+      `${formatSize(item.size_bytes)} | ${item.type || "unknown"} | ${timeAgo(item.encrypted_at)}`;
+    if (!isText(item)) article.querySelector('[data-a="copy"]').remove();
+    article.querySelector('[data-a="open"]').addEventListener("click", () => openViewer(item));
+    article.querySelector('[data-a="get"]').addEventListener("click", () => clientDownloadById(item.id, false));
+    const copyBtn = article.querySelector('[data-a="copy"]');
+    if (copyBtn) copyBtn.addEventListener("click", () => copyItem(item));
+    article.querySelector('[data-a="del"]').addEventListener("click", () => deleteItem(item));
+    list.appendChild(article);
+  }
+}
+function updateSummary() {
+  const total = state.items.reduce((s, i) => s + (i.size_bytes || 0), 0);
+  document.getElementById("count").textContent = state.items.length;
+  document.getElementById("total").textContent = `(${formatSize(total)})`;
+  document.getElementById("summary-actions").hidden = !state.items.length;
+}
+async function loadEncryptedItems() {
+  const response = await fetch("/nebula/catalog", { credentials: "same-origin", cache: "no-store" });
+  if (!response.ok) throw new Error("Could not load encrypted items.");
+  state.items = await response.json();
+  updateSummary(); renderItems();
+}
+async function fetchItemBlob(id) {
+  const response = await fetch(`/ember/${encodeURIComponent(id)}`, { credentials: "same-origin", cache: "no-store" });
+  if (!response.ok) throw new Error("Could not retrieve item.");
+  return response.blob();
+}
+async function clientDownloadById(itemId, viewOnly) {
+  if (viewOnly) window.open(`/ember/${encodeURIComponent(itemId)}`, "_blank", "noopener");
+  else { const a = document.createElement("a"); a.href = `/ember/${encodeURIComponent(itemId)}`; a.click(); }
+}
+async function copyItem(item) {
+  try {
+    const text = await (await fetchItemBlob(item.id)).text();
+    await navigator.clipboard.writeText(text);
+    const [, line, tr] = remark("copy");
+    toast("Copied to clipboard.", `${line} (${tr})`);
+  } catch (error) { showPopup("fail", `Copy failed: ${explainError(error)}`, "error"); }
+}
+async function deleteItem(item) {
+  try {
+    const response = await fetch(`/delete/${encodeURIComponent(item.id)}`, { method: "POST", credentials: "same-origin" });
+    if (!response.ok) throw new Error("Delete failed.");
+    showPopup("remove", `Deleted ${item.name}.`);
+    await loadEncryptedItems();
+  } catch (error) { showPopup("fail", explainError(error), "error"); }
+}
+document.getElementById("clear-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!confirm("Delete all items from memory?")) return;
+  try {
+    await fetch("/clear", { method: "POST", credentials: "same-origin" });
+    showPopup("reset", "Drift reset.");
+    await loadEncryptedItems();
+  } catch (error) { showPopup("fail", explainError(error), "error"); }
+});
+document.getElementById("search").addEventListener("input", (e) => { state.q = e.target.value; renderItems(); });
+document.getElementById("sort").addEventListener("change", (e) => { state.sort = e.target.value; renderItems(); });
 
-            uploadButton.disabled = true;
-            uploadStatus.textContent = "Uploading file...";
+/* ---------- viewer ---------- */
+const viewer = document.getElementById("viewer");
+const viewerBody = document.getElementById("viewer-body");
+let viewerUrl = null;
+async function openViewer(item) {
+  state.viewing = item;
+  document.getElementById("viewer-title").textContent = item.name;
+  viewerBody.textContent = "Loading...";
+  document.getElementById("viewer-copy").hidden = !isText(item);
+  viewer.showModal();
+  try {
+    const blob = await fetchItemBlob(item.id);
+    viewerBody.replaceChildren();
+    if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = null; }
+    if ((item.type || "").startsWith("image/")) {
+      viewerUrl = URL.createObjectURL(blob);
+      const img = document.createElement("img"); img.src = viewerUrl; img.alt = item.name;
+      viewerBody.appendChild(img);
+    } else if (isText(item)) {
+      const pre = document.createElement("pre"); pre.textContent = await blob.text();
+      viewerBody.appendChild(pre);
+    } else {
+      viewerBody.textContent = `No inline preview for this file type (${item.type || "unknown"}). Use Retrieve to download it.`;
+    }
+  } catch (error) { viewerBody.textContent = explainError(error); }
+}
+document.getElementById("viewer-close").addEventListener("click", () => viewer.close());
+viewer.addEventListener("click", (e) => { if (e.target === viewer) viewer.close(); });
+document.getElementById("viewer-download").addEventListener("click", () => { if (state.viewing) clientDownloadById(state.viewing.id, false); });
+document.getElementById("viewer-copy").addEventListener("click", () => { if (state.viewing) copyItem(state.viewing); });
 
-            try {
-                const content = new Uint8Array(await file.arrayBuffer());
-                const envelope = createEnvelope({
-                    name: file.name,
-                    type: file.type || "application/octet-stream",
-                    size_bytes: file.size,
-                    last_modified: file.lastModified,
-                    relative_path: file.webkitRelativePath || ""
-                }, content);
-                const cloakedPayload = await cloakEnvelope(envelope);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) {
+    e.preventDefault(); document.getElementById("search").focus();
+  }
+});
 
-                /*
-                 * Send only the encrypted envelope. No file metadata is sent
-                 * in the URL, headers, or other plaintext request fields.
-                 */
-                const response = await fetch(
-                    "/quasar/relay",
-                    {
-                        method: "POST",
-                        credentials: "same-origin",
-                        cache: "no-store",
-
-                        /* Send only the encrypted envelope as the raw body. */
-                        body: cloakedPayload
-                    }
-                );
-
-                const contentType =
-                    response.headers.get("content-type") || "";
-                const result = contentType.includes("application/json")
-                    ? await response.json()
-                    : {};
-
-                if (!response.ok) {
-                    throw new Error(
-                        result.error || "Upload failed."
-                    );
-                }
-
-                uploadStatus.textContent = `Stored encrypted item ${result.item_id} in RAM.`;
-
-                setTimeout(() => {
-                    window.location.reload();
-                }, 700);
-            } catch (error) {
-                const message = error instanceof TypeError
-                    ? "The upload request was blocked before reaching the "
-                      + "server. Check the network proxy or firewall."
-                    : explainError(error);
-
-                uploadStatus.textContent = `Upload failed: ${message}`;
-            } finally {
-                uploadButton.disabled = false;
-            }
-        });
-
-      document.getElementById("paste-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const content = form.elements.content.value;
-        const filename = form.elements.filename.value.trim() || "paste.txt";
-
-        if (!content) return;
-
-        try {
-          const plaintext = new TextEncoder().encode(content);
-          const envelope = createEnvelope({
-            name: filename,
-            type: "text/plain",
-            size_bytes: plaintext.length,
-            last_modified: Date.now(),
-            relative_path: ""
-          }, plaintext);
-          const cloakedPayload = await cloakEnvelope(envelope);
-          const response = await fetch(
-            "/quasar/relay",
-            {
-              method: "POST",
-              credentials: "same-origin",
-              cache: "no-store",
-              body: cloakedPayload
-            }
-          );
-          if (!response.ok) {
-            const result = await response.json();
-            throw new Error(result.error || "Could not store pasted content.");
-          }
-          window.location.reload();
-        } catch (error) {
-          alert(`Could not encrypt and store content: ${explainError(error)}`);
-        }
-      });
-
-      async function loadEncryptedItems() {
-        const response = await fetch("/nebula/catalog", {
-          credentials: "same-origin",
-          cache: "no-store"
-        });
-        if (!response.ok) throw new Error("Could not load encrypted items.");
-
-        const items = await response.json();
-        const list = document.querySelector(".items");
-        list.replaceChildren();
-
-        for (const item of items) {
-          try {
-            const decrypted = item;
-            const article = document.createElement("article");
-            article.className = "item";
-            article.innerHTML = `
-              <div class="item-header">
-                <div>
-                  <strong class="filename"></strong>
-                  <span class="metadata"></span>
-                </div>
-                <span class="metadata">${item.encrypted_size} encrypted bytes</span>
-              </div>
-              <div class="item-actions">
-                <button type="button" class="button secondary-button">Open</button>
-                <button type="button" class="button success-button">Retrieve</button>
-              </div>`;
-            article.querySelector(".filename").textContent = decrypted.name;
-            article.querySelector(".metadata").textContent =
-              `${decrypted.size_bytes} bytes | ${decrypted.type || "unknown"}`;
-            article.querySelector(".secondary-button").addEventListener(
-              "click", () => clientDownloadById(item.id, true)
-            );
-            article.querySelector(".success-button").addEventListener(
-              "click", () => clientDownloadById(item.id, false)
-            );
-            list.appendChild(article);
-          } catch (error) {
-            throw new Error(`Could not decrypt item ${item.id}: ${error.message}`);
-          }
-        }
-      }
-
-      async function clientDownloadById(itemId, viewOnly) {
-        if (viewOnly) {
-          window.open(`/ember/${encodeURIComponent(itemId)}`, "_blank", "noopener");
-        } else {
-          const link = document.createElement("a");
-          link.href = `/ember/${encodeURIComponent(itemId)}`;
-          link.click();
-        }
-      }
-
-      loadEncryptedItems().catch((error) => {
-        document.querySelector(".items").textContent =
-          `Could not decrypt stored items in this browser: ${error.message}`;
-      });
-
-  
-  </script>   
-  </body>
+updateCount();
+try { if (!sessionStorage.getItem("relay-welcomed")) { sessionStorage.setItem("relay-welcomed","1"); setTimeout(() => showPopup("welcome","Welcome to Obsidian Relay","ok"), 400); } } catch (e) {}
+loadEncryptedItems().catch((error) => {
+  document.querySelector(".items").textContent = `Could not decrypt stored items in this browser: ${error.message}`;
+});
+</script>
+</body>
 </html>
-
 """
 
 
@@ -952,8 +1092,7 @@ def read_request_stream(max_size):
 
     if content_length is not None and content_length > max_size:
         raise ValueError(
-            f"File is too large. Maximum size is "
-            f"{format_bytes(max_size)}."
+            f"File is too large. Maximum size is " f"{format_bytes(max_size)}."
         )
 
     buffer = bytearray()
@@ -970,8 +1109,7 @@ def read_request_stream(max_size):
 
         if total_size > max_size:
             raise ValueError(
-                f"File is too large. Maximum size is "
-                f"{format_bytes(max_size)}."
+                f"File is too large. Maximum size is " f"{format_bytes(max_size)}."
             )
 
         buffer.extend(chunk)
@@ -1011,10 +1149,18 @@ def unseal_item(item):
         )
         payload = json.loads(plaintext.decode("utf-8"))
         content = base64.b64decode(payload["content"], validate=True)
-        if payload.get("version") != 1 or payload["metadata"]["size_bytes"] != len(content):
+        if payload.get("version") != 1 or payload["metadata"]["size_bytes"] != len(
+            content
+        ):
             raise ValueError
         return payload
-    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as error:
         raise RuntimeError("Stored file payload is invalid.") from error
 
 
@@ -1047,14 +1193,10 @@ def api_upload_stream():
     try:
         encrypted_bytes = read_request_stream(max_size)
     except ValueError as error:
-        return jsonify({
-            "error": str(error)
-        }), 413
+        return jsonify({"error": str(error)}), 413
 
     if not encrypted_bytes:
-        return jsonify({
-            "error": "The request body is empty."
-        }), 400
+        return jsonify({"error": "The request body is empty."}), 400
 
     try:
         envelope = json.loads(encrypted_bytes.decode("utf-8"))
@@ -1062,15 +1204,26 @@ def api_upload_stream():
             raise ValueError
         for field in ("wrapped_key", "iv", "ciphertext"):
             base64.b64decode(envelope[field], validate=True)
-    except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+    ) as error:
         return jsonify({"error": "Invalid file envelope."}), 400
 
     item = create_storage_item(encrypted_bytes)
 
-    return jsonify({
-        "message": "Stored protected payload in RAM memory.",
-        "item_id": item["id"],
-    }), 201
+    return (
+        jsonify(
+            {
+                "message": "Stored protected payload in RAM memory.",
+                "item_id": item["id"],
+            }
+        ),
+        201,
+    )
 
 
 @app.route("/aurora/orbit", methods=["GET"])
@@ -1083,8 +1236,7 @@ def public_orbit_key():
 def api_get_items():
     """Return decrypted metadata for browser rendering."""
     summary = [
-        {**unseal_item(item)["metadata"], "id": item["id"]}
-        for item in STORAGE.values()
+        {**unseal_item(item)["metadata"], "id": item["id"]} for item in STORAGE.values()
     ]
 
     return jsonify(summary)
@@ -1140,10 +1292,7 @@ def download_zip():
 
                 name, extension = os.path.splitext(original_name)
 
-                archive_name = (
-                    f"{name}_{used_names[original_name]}"
-                    f"{extension}"
-                )
+                archive_name = f"{name}_{used_names[original_name]}" f"{extension}"
             else:
                 used_names[original_name] = 0
 
@@ -1154,11 +1303,7 @@ def download_zip():
 
     memory_zip.seek(0)
 
-    zip_name = (
-        "vault_"
-        f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-        ".zip"
-    )
+    zip_name = "vault_" f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}" ".zip"
 
     return send_file(
         memory_zip,
@@ -1188,9 +1333,14 @@ def clear_store():
 def request_too_large(error):
     """Return a JSON response when Flask rejects an oversized request."""
     if request.path.startswith("/api/"):
-        return jsonify({
-            "error": "The uploaded file exceeds the 100 MB limit.",
-        }), 413
+        return (
+            jsonify(
+                {
+                    "error": "The uploaded file exceeds the 100 MB limit.",
+                }
+            ),
+            413,
+        )
 
     return "The uploaded file exceeds the 100 MB limit.", 413
 
