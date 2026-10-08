@@ -26,6 +26,8 @@ import os
 import urllib.parse
 import uuid
 import zipfile
+import mimetypes
+import os
 
 from datetime import datetime
 
@@ -507,7 +509,7 @@ HTML_TEMPLATE = """
         selectedButton.classList.add("active");
       }
 
-   document
+      document
         .getElementById("upload-button")
         .addEventListener("click", async () => {
             const fileInput = document.getElementById("file-input");
@@ -521,32 +523,27 @@ HTML_TEMPLATE = """
             }
 
             uploadButton.disabled = true;
-            uploadStatus.textContent = "Uploading raw file bytes...";
+            uploadStatus.textContent = "Uploading file...";
 
             try {
-                const response = await fetch("/api/upload-stream", {
-                    method: "POST",
+                const filename = encodeURIComponent(file.name);
 
-                    /*
-                     * Send the file directly as the raw request body.
-                     *
-                     * Do not use:
-                     *   new FormData()
-                     *   file.stream()
-                     *   multipart/form-data
-                     *
-                     * Because `file` is a Blob/File, this does not require
-                     * duplex: "half".
-                     */
-                    body: file,
+                /*
+                 * Use a relative URL so the request stays on the same origin.
+                 * The filename is sent in the URL instead of a custom header.
+                 */
+                const response = await fetch(
+                    `/api/upload-stream?filename=${filename}`,
+                    {
+                        method: "POST",
 
-                    headers: {
-                        "Content-Type":
-                            file.type || "application/octet-stream",
-
-                        "X-Filename": encodeURIComponent(file.name)
+                        /*
+                         * Send the File directly as the raw request body.
+                         * Do not use FormData or file.stream().
+                         */
+                        body: file
                     }
-                });
+                );
 
                 const result = await response.json();
 
@@ -570,7 +567,9 @@ HTML_TEMPLATE = """
                 uploadButton.disabled = false;
             }
         });
-</script>   
+
+  
+  </script>   
   </body>
 </html>
 
@@ -719,51 +718,42 @@ def create_paste():
 @app.route("/api/upload-stream", methods=["POST"])
 def api_upload_stream():
     """
-    Receive a file as the raw HTTP request body.
+    Receive raw file bytes.
 
-    Expected request:
-
-        POST /api/upload-stream
-        Content-Type: application/pdf
-        X-Filename: document.pdf
-
-        <raw file bytes>
+    The file content is in the request body.
+    The filename is sent as a query parameter.
     """
     max_size = app.config["MAX_CONTENT_LENGTH"]
 
-    encoded_filename = request.headers.get(
-        "X-Filename",
-        "",
-    ).strip()
+    filename = request.args.get("filename", "").strip()
 
-    if encoded_filename:
-        try:
-            filename = urllib.parse.unquote(encoded_filename)
-        except UnicodeError:
-            filename = "uploaded_file.bin"
-    else:
-        filename = "uploaded_file.bin"
+    if not filename:
+        return jsonify({
+            "error": "Missing filename query parameter."
+        }), 400
 
-    # Prevent directory traversal in the supplied filename.
+    # Remove any directory component from the supplied name.
     filename = os.path.basename(filename)
 
     if not filename:
-        filename = "uploaded_file.bin"
+        return jsonify({
+            "error": "Invalid filename."
+        }), 400
 
     try:
         raw_bytes = read_request_stream(max_size)
     except ValueError as error:
         return jsonify({
-            "error": str(error),
+            "error": str(error)
         }), 413
 
     if not raw_bytes:
         return jsonify({
-            "error": "The request body is empty.",
+            "error": "The request body is empty."
         }), 400
 
     mimetype = (
-        request.headers.get("Content-Type", "").strip()
+        request.args.get("content_type", "").strip()
         or mimetypes.guess_type(filename)[0]
         or "application/octet-stream"
     )
@@ -781,8 +771,6 @@ def api_upload_stream():
         "size_bytes": item["size_bytes"],
         "mimetype": item["mimetype"],
     }), 201
-
-
 @app.route("/api/items", methods=["GET"])
 def api_get_items():
     """Return metadata for all stored items."""
